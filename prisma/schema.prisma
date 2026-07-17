@@ -1,0 +1,357 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id          String @id @default(cuid())
+  code        String @unique
+  name        String
+  permissions String[] @default([])
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id           String           @id @default(cuid())
+  name         String
+  email        String           @unique
+  passwordHash String
+  isActive     Boolean          @default(true)
+  roleId       String
+  role         Role             @relation(fields: [roleId], references: [id])
+  createdAt    DateTime         @default(now())
+  inbound      InboundOrder[]
+  importOrders ImportOrder[]
+  outbound     OutboundOrder[]
+  movements    KardexMovement[]
+  adjustments  InventoryAdjustment[]
+
+  @@map("users")
+}
+
+model Company {
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  theme          String          @default("orange")
+  primaryColor   String          @default("#ea580c")
+  warehouses     Warehouse[]
+  clients        Client[]
+  suppliers      Supplier[]
+  inboundOrders  InboundOrder[]
+  importOrders   ImportOrder[]
+  outboundOrders OutboundOrder[]
+  createdAt      DateTime        @default(now())
+
+  @@map("companies")
+}
+
+model Product {
+  id                 String              @id @default(cuid())
+  sku                String              @unique
+  barcode            String?
+  barcodes           String[]            @default([])
+  name               String
+  category           String
+  brand              String
+  unit               String              @default("Unidad")
+  purchasePrice      Decimal             @default(0) @db.Decimal(12, 2)
+  salePrice          Decimal             @default(0) @db.Decimal(12, 2)
+  stockMin           Int                 @default(1)
+  managesSerial      Boolean             @default(false)
+  status             String              @default("ACTIVE")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  inventoryUnits     InventoryUnit[]
+  inventoryBalances  InventoryBalance[]
+  locationDefaults   ProductLocationDefault[]
+  inboundItems       InboundOrderItem[]
+  importItems        ImportOrderItem[]
+  outboundItems      OutboundOrderItem[]
+  kardexMovements    KardexMovement[]
+  adjustments        InventoryAdjustment[]
+
+  @@map("products")
+}
+
+model Warehouse {
+  id                 String              @id @default(cuid())
+  name               String
+  code               String
+  companyId          String
+  company            Company             @relation(fields: [companyId], references: [id])
+  locations          Location[]
+  inventoryUnits     InventoryUnit[]
+  inventoryBalances  InventoryBalance[]
+  productDefaults    ProductLocationDefault[]
+  inboundOrders      InboundOrder[]
+  outboundOrders     OutboundOrder[]
+  kardexMovements    KardexMovement[]
+
+  @@unique([companyId, code])
+  @@map("warehouses")
+}
+
+model Location {
+  id                 String              @id @default(cuid())
+  name               String
+  code               String
+  warehouseId        String
+  warehouse          Warehouse           @relation(fields: [warehouseId], references: [id])
+  inventoryUnits     InventoryUnit[]
+  inventoryBalances  InventoryBalance[]
+  productDefaults    ProductLocationDefault[]
+  inboundOrders      InboundOrder[]
+  inboundItems       InboundOrderItem[]
+  outboundOrders     OutboundOrder[]
+  kardexMovements    KardexMovement[]
+  adjustmentFrom     InventoryAdjustment[] @relation("AdjustmentFromLocation")
+  adjustmentTo       InventoryAdjustment[] @relation("AdjustmentToLocation")
+
+  @@unique([warehouseId, code])
+  @@map("locations")
+}
+
+model ProductLocationDefault {
+  id          String    @id @default(cuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  locationId  String
+  location    Location  @relation(fields: [locationId], references: [id])
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([productId, warehouseId])
+  @@map("product_location_defaults")
+}
+
+model InventoryUnit {
+  id              String              @id @default(cuid())
+  productId       String
+  product         Product             @relation(fields: [productId], references: [id])
+  serialNumber    String?
+  warehouseId     String
+  warehouse       Warehouse           @relation(fields: [warehouseId], references: [id])
+  locationId      String
+  location        Location            @relation(fields: [locationId], references: [id])
+  status          String              @default("AVAILABLE")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  kardexMovements KardexMovement[]
+  adjustments     InventoryAdjustment[]
+
+  @@unique([productId, serialNumber])
+  @@index([serialNumber])
+  @@index([status])
+  @@map("inventory_units")
+}
+
+model InventoryBalance {
+  id          String    @id @default(cuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  locationId  String
+  location    Location  @relation(fields: [locationId], references: [id])
+  status      String
+  quantity    Int
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([productId, warehouseId, locationId, status])
+  @@map("inventory_balances")
+}
+
+model Client {
+  id          String          @id @default(cuid())
+  companyId   String
+  company     Company         @relation(fields: [companyId], references: [id])
+  name        String
+  taxId       String
+  contact     String
+  phone       String
+  email       String
+  address     String
+  status      String          @default("ACTIVE")
+  createdAt   DateTime        @default(now())
+  orders      OutboundOrder[]
+
+  @@unique([companyId, taxId])
+  @@map("clients")
+}
+
+model Supplier {
+  id          String         @id @default(cuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id])
+  name        String
+  taxId       String
+  contact     String
+  phone       String
+  email       String
+  address     String
+  status      String         @default("ACTIVE")
+  createdAt   DateTime       @default(now())
+  orders      InboundOrder[]
+  importOrders ImportOrder[]
+
+  @@unique([companyId, taxId])
+  @@map("suppliers")
+}
+
+model InboundOrder {
+  id          String             @id @default(cuid())
+  orderNo     String             @unique
+  companyId   String
+  company     Company            @relation(fields: [companyId], references: [id])
+  supplierId  String
+  supplier    Supplier           @relation(fields: [supplierId], references: [id])
+  warehouseId String
+  warehouse   Warehouse          @relation(fields: [warehouseId], references: [id])
+  locationId  String
+  location    Location           @relation(fields: [locationId], references: [id])
+  purchaseOrder String?
+  status      String             @default("DRAFT")
+  notes       String?
+  carrierName String?
+  guideNumber String?
+  createdById String?
+  createdBy   User?              @relation(fields: [createdById], references: [id])
+  confirmedAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  items       InboundOrderItem[]
+
+  @@map("inbound_orders")
+}
+
+model ImportOrder {
+  id            String            @id @default(cuid())
+  orderNo       String            @unique
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id])
+  supplierId    String
+  supplier      Supplier          @relation(fields: [supplierId], references: [id])
+  purchaseOrder String?
+  status        String            @default("DRAFT")
+  notes         String?
+  createdById   String?
+  createdBy     User?             @relation(fields: [createdById], references: [id])
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  items         ImportOrderItem[]
+
+  @@map("import_orders")
+}
+
+model ImportOrderItem {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     ImportOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product     @relation(fields: [productId], references: [id])
+  quantity  Int
+
+  @@map("import_order_items")
+}
+
+model InboundOrderItem {
+  id            String       @id @default(cuid())
+  orderId       String
+  order         InboundOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product      @relation(fields: [productId], references: [id])
+  locationId    String?
+  location      Location?    @relation(fields: [locationId], references: [id])
+  quantity      Int
+  serialNumbers String[]     @default([])
+
+  @@map("inbound_order_items")
+}
+
+model OutboundOrder {
+  id          String              @id @default(cuid())
+  orderNo     String              @unique
+  companyId   String
+  company     Company             @relation(fields: [companyId], references: [id])
+  clientId    String
+  client      Client              @relation(fields: [clientId], references: [id])
+  warehouseId String
+  warehouse   Warehouse           @relation(fields: [warehouseId], references: [id])
+  locationId  String
+  location    Location            @relation(fields: [locationId], references: [id])
+  purchaseOrder String?
+  status      String              @default("DRAFT")
+  notes       String?
+  createdById String?
+  createdBy   User?               @relation(fields: [createdById], references: [id])
+  confirmedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  items       OutboundOrderItem[]
+
+  @@map("outbound_orders")
+}
+
+model OutboundOrderItem {
+  id            String        @id @default(cuid())
+  orderId       String
+  order         OutboundOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product       @relation(fields: [productId], references: [id])
+  quantity      Int
+  serialNumbers String[]      @default([])
+
+  @@map("outbound_order_items")
+}
+
+model KardexMovement {
+  id              String         @id @default(cuid())
+  type            String
+  productId       String
+  product         Product        @relation(fields: [productId], references: [id])
+  inventoryUnitId String?
+  inventoryUnit   InventoryUnit? @relation(fields: [inventoryUnitId], references: [id])
+  quantity        Int
+  warehouseId     String
+  warehouse       Warehouse      @relation(fields: [warehouseId], references: [id])
+  locationId      String
+  location        Location       @relation(fields: [locationId], references: [id])
+  userId          String?
+  user            User?          @relation(fields: [userId], references: [id])
+  documentType    String
+  documentNo      String
+  observation     String
+  createdAt       DateTime       @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+  @@map("kardex_movements")
+}
+
+model InventoryAdjustment {
+  id              String         @id @default(cuid())
+  type            String
+  productId       String
+  product         Product        @relation(fields: [productId], references: [id])
+  inventoryUnitId String?
+  inventoryUnit   InventoryUnit? @relation(fields: [inventoryUnitId], references: [id])
+  quantity        Int
+  fromLocationId  String?
+  fromLocation    Location?      @relation("AdjustmentFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId    String?
+  toLocation      Location?      @relation("AdjustmentToLocation", fields: [toLocationId], references: [id])
+  reason          String
+  userId          String?
+  user            User?          @relation(fields: [userId], references: [id])
+  createdAt       DateTime       @default(now())
+
+  @@map("inventory_adjustments")
+}
