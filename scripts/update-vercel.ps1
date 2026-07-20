@@ -17,8 +17,25 @@ function Invoke-Checked {
   }
 }
 
+function Normalize-DatabaseUrl {
+  param([string]$Value)
+
+  $normalized = $Value.Trim()
+  if ($normalized -match '^DATABASE_URL\s*=\s*(.+)$') {
+    $normalized = $Matches[1].Trim()
+  }
+  $normalized = $normalized.Trim('"').Trim("'")
+  return $normalized
+}
+
 if (-not $DatabaseUrl) {
   $DatabaseUrl = Read-Host "Pega DATABASE_URL directa de Neon para migraciones (sin -pooler)"
+}
+
+$DatabaseUrl = Normalize-DatabaseUrl $DatabaseUrl
+
+if ($DatabaseUrl -notmatch '^postgres(ql)?://') {
+  throw "DATABASE_URL invalida. Debe empezar con postgresql:// o postgres://. No pegues la URL de la consola de Neon ni el texto DATABASE_URL=."
 }
 
 if ($DatabaseUrl -match "-pooler") {
