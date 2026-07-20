@@ -18,7 +18,6 @@ import {
   ClipboardList,
   FileDown,
   Home,
-  LogOut,
   Menu,
   PackagePlus,
   PackageSearch,
@@ -242,6 +241,21 @@ function AppShell() {
               </NavLink>
             ))}
           </nav>
+          <div className="wms-sidebar-session">
+            <div className="wms-sidebar-user">
+              <div className="text-sm font-bold">{user?.name}</div>
+              <div className="text-xs text-slate-500">{user?.roleName}</div>
+            </div>
+            <button
+              className="wms-button wms-sidebar-logout"
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+            >
+              Cerrar sesion
+            </button>
+          </div>
         </aside>
         <main className="wms-main">
           <header className="wms-header">
@@ -250,7 +264,7 @@ function AppShell() {
                 <Menu size={18} />
               </button>
               <div>
-                <h1 className="text-lg font-extrabold">Warehouse Management System</h1>
+                <h1 className="text-lg font-extrabold">WMS</h1>
                 <p className="text-sm text-slate-500">Maquinaria, repuestos, accesorios e insumos</p>
               </div>
             </div>
@@ -283,15 +297,6 @@ function AppShell() {
                 <div className="text-sm font-bold">{user?.name}</div>
                 <div className="text-xs text-slate-500">{user?.roleName}</div>
               </div>
-              <button
-                className="wms-button"
-                onClick={() => {
-                  logout();
-                  navigate('/login');
-                }}
-              >
-                <LogOut size={16} />
-              </button>
             </div>
           </header>
           <div className="wms-content" key={companyId}>

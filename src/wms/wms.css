@@ -40,6 +40,8 @@
 .wms-sidebar {
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   border-right: 1px solid #e5e7eb;
   background: #ffffff;
@@ -110,7 +112,10 @@
 
 .wms-nav {
   display: grid;
+  align-content: start;
   gap: 6px;
+  flex: 1 1 auto;
+  overflow-y: auto;
 }
 
 .wms-nav a {
@@ -128,6 +133,35 @@
 .wms-nav a:hover {
   background: var(--wms-primary-soft);
   color: var(--wms-primary);
+}
+
+.wms-sidebar-session {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 14px;
+  margin-top: 14px;
+}
+
+.wms-sidebar-user {
+  min-width: 0;
+}
+
+.wms-sidebar-logout {
+  justify-content: center;
+  width: 100%;
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.wms-sidebar-logout:hover {
+  background: #ffe4e6;
+  color: #9f1239;
+}
+
+.wms-sidebar.collapsed .wms-sidebar-session {
+  display: none;
 }
 
 .wms-main {
@@ -588,6 +622,10 @@
   .wms-sidebar.collapsed .wms-brand-text,
   .wms-sidebar.collapsed .wms-nav span {
     display: block;
+  }
+
+  .wms-sidebar.collapsed .wms-sidebar-session {
+    display: grid;
   }
 
   .wms-sidebar.collapsed .wms-sidebar-collapse {
