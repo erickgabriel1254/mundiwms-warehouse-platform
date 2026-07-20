@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:empty": "tsx prisma/empty-demo.ts",
     "db:reset": "prisma migrate reset --force",
     "deploy:vercel": "vercel --prod",
     "create-demo-user": "tsx scripts/create-demo-user.js",
