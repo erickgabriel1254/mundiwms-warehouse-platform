@@ -56,6 +56,16 @@ export type Product = {
   _count?: { inboundItems: number; outboundItems: number; kardexMovements: number };
 };
 
+export type ProductCategory = {
+  id: string;
+  code: string;
+  name: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  createdAt: string;
+  updatedAt: string;
+  _count?: { products: number };
+};
+
 export type Warehouse = { id: string; code: string; name: string; companyId?: string; company?: Company };
 export type Location = { id: string; code: string; name: string; warehouseId: string; warehouse?: Warehouse };
 export type ProductLocationDefault = { id: string; productId: string; warehouseId: string; locationId: string; warehouse: Warehouse; location: Location };
@@ -180,6 +190,7 @@ export type KardexMovement = {
 
 export type Catalogs = {
   companies: Company[];
+  categories: ProductCategory[];
   products: Product[];
   suppliers: Contact[];
   clients: Contact[];

@@ -259,6 +259,20 @@ async function main() {
     ['MAQ-IND-005', 'Maquina botonera industrial', 'Maquina Industrial', 'Juki', true, 1],
   ] as const;
 
+  const categoryNames = Array.from(new Set(productRows.map(([, , category]) => category)));
+  await prisma.productCategory.createMany({
+    data: categoryNames.map((name) => ({
+      code: name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase(),
+      name,
+    })),
+    skipDuplicates: true,
+  });
+
   const products = await Promise.all(
     productRows.map(([sku, name, category, brand, managesSerial, stockMin], index) =>
       prisma.product.create({

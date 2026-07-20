@@ -13,6 +13,7 @@ import {
   getReports,
   listCompanies,
   deleteProduct,
+  deleteProductCategory,
   deleteContact,
   deleteLocation,
   deleteWarehouse,
@@ -24,6 +25,7 @@ import {
   listInventory,
   listKardex,
   listOutbound,
+  listProductCategories,
   listProducts,
   listRoles,
   listUsers,
@@ -37,6 +39,7 @@ import {
   saveLocation,
   saveOutbound,
   saveProduct,
+  saveProductCategory,
   saveRole,
   saveUser,
   saveWarehouse,
@@ -77,6 +80,10 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
     if (method === 'GET' && path === '/companies') return send(res, 200, await listCompanies());
     if (method === 'GET' && path === '/catalogs') return send(res, 200, await getCatalogs(companyId));
     if (method === 'GET' && path === '/dashboard') return send(res, 200, await getDashboard(companyId));
+    if (method === 'GET' && path === '/categories') return send(res, 200, await listProductCategories());
+    if (method === 'POST' && path === '/categories') return send(res, 200, await saveProductCategory(await readBody(req)));
+    if (method === 'PUT' && parts[0] === 'categories' && parts[1]) return send(res, 200, await saveProductCategory(await readBody(req), parts[1]));
+    if (method === 'DELETE' && parts[0] === 'categories' && parts[1]) return send(res, 200, await deleteProductCategory(parts[1], user.role.code));
     if (method === 'GET' && path === '/products') return send(res, 200, await listProducts(url.searchParams.get('search') ?? '', companyId));
     if (method === 'POST' && path === '/products') return send(res, 200, await saveProduct(await readBody(req)));
     if (method === 'PUT' && parts[0] === 'products' && parts[1]) return send(res, 200, await saveProduct(await readBody(req), parts[1]));

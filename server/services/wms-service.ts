@@ -26,6 +26,12 @@ const productSchema = z.object({
     .default([]),
 });
 
+const productCategorySchema = z.object({
+  code: z.string().trim().max(24).optional(),
+  name: z.string().trim().min(2).max(80),
+  status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+});
+
 const contactSchema = z.object({
   name: z.string().min(3),
   taxId: z.string().min(5),
@@ -175,6 +181,17 @@ function nextOrderNo(prefix: 'IN' | 'OUT' | 'PED') {
   return `${prefix}-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
 }
 
+function normalizeCategoryCode(value: string) {
+  const code = value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  return code || `CAT_${Date.now()}`;
+}
+
 export async function login(body: unknown) {
   const data = z.object({ email: z.string().email(), password: z.string().min(1) }).parse(body);
   const user = await prisma.user.findUnique({ where: { email: data.email }, include: { role: true } });
@@ -194,8 +211,9 @@ export async function me(userId: string) {
 }
 
 export async function getCatalogs(companyId: string) {
-  const [companies, products, suppliers, clients, warehouses, locations] = await Promise.all([
+  const [companies, categories, products, suppliers, clients, warehouses, locations] = await Promise.all([
     prisma.company.findMany({ orderBy: { name: 'asc' } }),
+    listProductCategories(),
     prisma.product.findMany({
       orderBy: { sku: 'asc' },
       include: {
@@ -208,7 +226,7 @@ export async function getCatalogs(companyId: string) {
     prisma.warehouse.findMany({ where: { companyId }, orderBy: { name: 'asc' }, include: { company: true } }),
     prisma.location.findMany({ where: { warehouse: { companyId } }, orderBy: { name: 'asc' }, include: { warehouse: true } }),
   ]);
-  return { companies, products, suppliers, clients, warehouses, locations };
+  return { companies, categories, products, suppliers, clients, warehouses, locations };
 }
 
 export async function getDashboard(companyId: string) {
@@ -305,8 +323,59 @@ export async function listProducts(search = '', companyId: string) {
   });
 }
 
+export async function listProductCategories() {
+  const [categories, productCounts] = await Promise.all([
+    prisma.productCategory.findMany({ orderBy: [{ status: 'asc' }, { name: 'asc' }] }),
+    prisma.product.groupBy({ by: ['category'], _count: { _all: true } }),
+  ]);
+  const counts = new Map(productCounts.map((item) => [item.category, item._count._all]));
+  return categories.map((category) => ({ ...category, _count: { products: counts.get(category.name) ?? 0 } }));
+}
+
+export async function saveProductCategory(body: unknown, id?: string) {
+  const data = productCategorySchema.parse(body);
+  const payload = {
+    code: normalizeCategoryCode(data.code || data.name),
+    name: data.name.trim(),
+    status: data.status,
+  };
+
+  if (!id) {
+    return prisma.productCategory.create({ data: payload });
+  }
+
+  const current = await prisma.productCategory.findUnique({ where: { id } });
+  if (!current) throw new Error('Categoria no encontrada');
+  return prisma.$transaction(async (tx) => {
+    const category = await tx.productCategory.update({ where: { id }, data: payload });
+    if (current.name !== category.name) {
+      await tx.product.updateMany({ where: { category: current.name }, data: { category: category.name } });
+    }
+    return category;
+  });
+}
+
+export async function deleteProductCategory(id: string, roleCode: string) {
+  if (!['ADMIN', 'SUPERVISOR'].includes(roleCode)) {
+    throw new Error('No tiene permisos para eliminar categorias');
+  }
+  const category = await prisma.productCategory.findUnique({ where: { id } });
+  if (!category) throw new Error('Categoria no encontrada');
+  const products = await prisma.product.count({ where: { category: category.name } });
+  if (products > 0) {
+    await prisma.productCategory.update({ where: { id }, data: { status: 'INACTIVE' } });
+    return { ok: true, mode: 'INACTIVATED' as const };
+  }
+  await prisma.productCategory.delete({ where: { id } });
+  return { ok: true, mode: 'DELETED' as const };
+}
+
 export async function saveProduct(body: unknown, id?: string) {
   const data = productSchema.parse(body);
+  const category = await prisma.productCategory.findUnique({ where: { name: data.category } });
+  if (!category || category.status !== 'ACTIVE') {
+    throw new Error('Seleccione una categoria activa');
+  }
   const { locationDefaults, ...productData } = data;
   const payload = {
     ...productData,

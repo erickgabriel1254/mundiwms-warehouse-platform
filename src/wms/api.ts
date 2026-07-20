@@ -51,6 +51,13 @@ export const wmsApi = {
   companies: () => api<import('./types').Company[]>('/companies'),
   catalogs: () => api<Catalogs>('/catalogs'),
   dashboard: () => api<DashboardData>('/dashboard'),
+  categories: () => api<import('./types').ProductCategory[]>('/categories'),
+  saveCategory: (payload: unknown, id?: string) =>
+    api<import('./types').ProductCategory>(id ? `/categories/${id}` : '/categories', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteCategory: (id: string) => api<{ ok: boolean; mode: 'DELETED' | 'INACTIVATED' }>(`/categories/${id}`, { method: 'DELETE' }),
   products: (search = '') => api<import('./types').Product[]>(`/products?search=${encodeURIComponent(search)}`),
   saveProduct: (payload: unknown, id?: string) =>
     api<import('./types').Product>(id ? `/products/${id}` : '/products', {

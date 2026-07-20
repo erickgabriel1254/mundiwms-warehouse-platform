@@ -24,6 +24,7 @@ import {
   Save,
   Send,
   Settings2,
+  Tags,
   Trash2,
   Truck,
   Users,
@@ -52,12 +53,12 @@ import type {
   OrderItem,
   OutboundOrder,
   Product,
+  ProductCategory,
   Role,
   UserSession,
   Warehouse as WarehouseType,
 } from './types';
 
-const categories = ['Maquina Industrial', 'Maquina Domestica', 'Cortadora de Tela', 'Repuestos', 'Accesorios', 'Insumos'];
 const rolePermissionOptions = [
   ['dashboard:view', 'Ver dashboard'],
   ['products:manage', 'Gestionar productos'],
@@ -206,6 +207,7 @@ function AppShell() {
   const nav = [
     ['/', 'Dashboard', Home],
     ['/productos', 'Productos', PackageSearch],
+    ['/categorias', 'Categorias', Tags],
     ['/inventario', 'Inventario', Boxes],
     ['/bodegas', 'Bodegas', Warehouse],
     ['/pedidos', 'Generar pedido', ClipboardList],
@@ -303,6 +305,7 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/productos" element={<ProductsPage />} />
+              <Route path="/categorias" element={<CategoriesPage />} />
               <Route path="/inventario" element={<InventoryPage />} />
               <Route path="/bodegas" element={<WarehousesPage />} />
               <Route path="/pedidos" element={<ImportOrdersPage />} />
@@ -569,6 +572,14 @@ const productSchema = z.object({
 
 type ProductFormValues = z.infer<typeof productSchema>;
 
+const categorySchema = z.object({
+  code: z.string().optional(),
+  name: z.string().min(2),
+  status: z.enum(['ACTIVE', 'INACTIVE']),
+});
+
+type CategoryFormValues = z.infer<typeof categorySchema>;
+
 function ProductsPage() {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Product | null | undefined>(undefined);
@@ -724,6 +735,99 @@ function ProductsPage() {
   );
 }
 
+function CategoriesPage() {
+  const { user } = useAuth();
+  const { data, loading, refresh } = useLoad<ProductCategory[]>(() => wmsApi.categories(), []);
+  const [editing, setEditing] = useState<ProductCategory | null | undefined>(undefined);
+  const canDelete = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+  const removeCategory = async (category: ProductCategory) => {
+    try {
+      const response = await wmsApi.deleteCategory(category.id);
+      toast.success(response.mode === 'DELETED' ? 'Categoria eliminada' : 'Categoria inactivada porque tiene productos');
+      refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo eliminar');
+    }
+  };
+
+  return (
+    <>
+      <PageTitle
+        title="Categorias"
+        subtitle="Tipos de productos disponibles para el catalogo"
+        action={<button className="wms-button primary" onClick={() => setEditing(null)}><Tags size={16} /> Nueva categoria</button>}
+      />
+      <div className="wms-card">
+        {loading ? <div className="wms-card-body">Cargando...</div> : null}
+        <DataTable
+          data={data ?? []}
+          columns={[
+            { header: 'Codigo', accessorKey: 'code' },
+            { header: 'Nombre', accessorKey: 'name' },
+            { header: 'Productos', cell: ({ row }) => row.original._count?.products ?? 0 },
+            { header: 'Estado', cell: ({ row }) => <Badge value={row.original.status} /> },
+            {
+              header: 'Acciones',
+              cell: ({ row }) => (
+                <div className="wms-actions">
+                  <button className="wms-button" onClick={() => setEditing(row.original)}>Editar</button>
+                  <button className="wms-button danger" disabled={!canDelete} title={canDelete ? 'Eliminar categoria' : 'Solo administrador o supervisor'} onClick={() => removeCategory(row.original)}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
+      {editing !== undefined ? <CategoryForm category={editing} onClose={() => setEditing(undefined)} onSaved={refresh} /> : null}
+    </>
+  );
+}
+
+function CategoryForm({ category, onClose, onSaved }: { category: ProductCategory | null; onClose: () => void; onSaved: () => void }) {
+  const form = useForm<CategoryFormValues>({
+    resolver: zodResolver(categorySchema),
+    defaultValues: category ?? { code: '', name: '', status: 'ACTIVE' },
+  });
+  const submit = form.handleSubmit(async (values) => {
+    try {
+      await wmsApi.saveCategory(values, category?.id);
+      toast.success('Categoria guardada');
+      onSaved();
+      onClose();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar');
+    }
+  });
+
+  return (
+    <Modal title={category ? 'Editar categoria' : 'Nueva categoria'} onClose={onClose}>
+      <form className="wms-grid" onSubmit={submit}>
+        <label className="wms-label">
+          Codigo
+          <input className="wms-input" {...form.register('code')} placeholder="Opcional, se genera con el nombre" />
+        </label>
+        <label className="wms-label">
+          Nombre
+          <input className="wms-input" {...form.register('name')} placeholder="Ej. Herramientas" />
+        </label>
+        <label className="wms-label">
+          Estado
+          <select className="wms-select" {...form.register('status')}>
+            <option value="ACTIVE">Activo</option>
+            <option value="INACTIVE">Inactivo</option>
+          </select>
+        </label>
+        <div className="wms-actions justify-end">
+          <button type="button" className="wms-button" onClick={onClose}>Cancelar</button>
+          <button className="wms-button primary"><Save size={16} /> Guardar</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 type ProductLocationRow = {
   warehouse: string;
   location: string;
@@ -767,6 +871,8 @@ function buildProductLocationRows(product: Product): ProductLocationRow[] {
 }
 
 function ProductForm({ product, catalogs, onClose, onSaved }: { product: Product | null; catalogs: Catalogs; onClose: () => void; onSaved: () => void }) {
+  const activeCategoryNames = catalogs.categories.filter((category) => category.status === 'ACTIVE').map((category) => category.name);
+  const categoryOptions = product?.category && !activeCategoryNames.includes(product.category) ? [...activeCategoryNames, product.category] : activeCategoryNames;
   const [locationDefaults, setLocationDefaults] = useState(
     catalogs.warehouses.map((warehouse) => ({
       warehouseId: warehouse.id,
@@ -787,7 +893,7 @@ function ProductForm({ product, catalogs, onClose, onSaved }: { product: Product
           salePrice: Number(product.salePrice ?? 0),
           locationDefaults: product.locationDefaults?.map((entry) => ({ warehouseId: entry.warehouseId, locationId: entry.locationId })) ?? [],
         }
-      : { sku: '', barcode: '', barcodesText: '', name: '', category: categories[0], brand: '', unit: 'Unidad', purchasePrice: 0, salePrice: 0, stockMin: 1, managesSerial: false, status: 'ACTIVE', locationDefaults: [] },
+      : { sku: '', barcode: '', barcodesText: '', name: '', category: categoryOptions[0] ?? '', brand: '', unit: 'Unidad', purchasePrice: 0, salePrice: 0, stockMin: 1, managesSerial: false, status: 'ACTIVE', locationDefaults: [] },
   });
   const submit = form.handleSubmit(async (values) => {
     try {
@@ -821,8 +927,9 @@ function ProductForm({ product, catalogs, onClose, onSaved }: { product: Product
         </label>
         <label className="wms-label">
           Categoria
-          <select className="wms-select" {...form.register('category')}>
-            {categories.map((category) => (
+          <select className="wms-select" {...form.register('category')} disabled={!categoryOptions.length}>
+            {!categoryOptions.length ? <option value="">Cree una categoria primero</option> : null}
+            {categoryOptions.map((category) => (
               <option key={category}>{category}</option>
             ))}
           </select>
