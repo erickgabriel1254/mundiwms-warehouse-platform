@@ -149,6 +149,21 @@
   padding: 0 32px;
 }
 
+.wms-header-title {
+  min-width: 0;
+}
+
+.wms-header-title h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wms-header-actions {
+  min-width: 0;
+  flex-shrink: 0;
+}
+
 .wms-header-alert {
   display: inline-flex;
   align-items: center;
@@ -606,7 +621,19 @@
 
   .wms-header {
     min-height: 52px;
+    gap: 6px;
     padding: 8px 10px;
+  }
+
+  .wms-header-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .wms-header-actions {
+    flex: 0 0 auto;
+    gap: 6px;
   }
 
   .wms-header h1 {
@@ -620,6 +647,30 @@
 
   .wms-header-alert span {
     display: none;
+  }
+
+  .wms-header-alert {
+    width: 34px;
+    min-height: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .wms-company-select {
+    min-width: 112px;
+    max-width: 122px;
+    gap: 0;
+  }
+
+  .wms-company-select span {
+    display: none;
+  }
+
+  .wms-company-select select {
+    min-height: 34px;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1;
   }
 
   .wms-content {

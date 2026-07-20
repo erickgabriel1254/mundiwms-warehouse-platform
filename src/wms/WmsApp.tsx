@@ -245,7 +245,7 @@ function AppShell() {
         </aside>
         <main className="wms-main">
           <header className="wms-header">
-            <div className="flex items-center gap-3">
+            <div className="wms-header-title flex items-center gap-3">
               <button className="wms-button wms-drawer-toggle" onClick={() => setOpen(true)} aria-label="Abrir menu">
                 <Menu size={18} />
               </button>
@@ -254,7 +254,7 @@ function AppShell() {
                 <p className="text-sm text-slate-500">Maquinaria, repuestos, accesorios e insumos</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="wms-header-actions flex items-center gap-3">
               {companies.data?.length ? (
                 <label className="wms-company-select">
                   <span>Empresa</span>
