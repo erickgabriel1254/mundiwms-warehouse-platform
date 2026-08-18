@@ -4,7 +4,17 @@ const PASSWORD = process.env.WMS_ADMIN_PASSWORD ?? 'Admin123!';
 
 type Company = { id: string; code: string; name: string };
 type Warehouse = { id: string; code: string; name: string; companyId?: string };
-type Location = { id: string; code: string; warehouseId: string };
+type Location = {
+  id: string;
+  code: string;
+  warehouseId: string;
+  zone?: string;
+  aisle?: string;
+  rack?: string;
+  level?: string;
+  position?: string;
+  kind?: string;
+};
 type Catalogs = { warehouses: Warehouse[]; locations: Location[] };
 
 type LayoutConfig = {
@@ -53,35 +63,52 @@ async function createLayout(token: string, company: Company, config: LayoutConfi
   const catalogs = await rawApi<Catalogs>('/catalogs', token, company.id);
   const warehouse = catalogs.warehouses[0];
   if (!warehouse) return 0;
-  const existingCodes = new Set(catalogs.locations.filter((location) => location.warehouseId === warehouse.id).map((location) => location.code));
-  let created = 0;
+  const existingByCode = new Map(catalogs.locations.filter((location) => location.warehouseId === warehouse.id).map((location) => [location.code, location]));
+  let changed = 0;
 
   for (let aisle = 1; aisle <= config.aisles; aisle += 1) {
     for (let rack = 1; rack <= config.racks; rack += 1) {
       for (let level = 1; level <= config.levels; level += 1) {
         for (let position = 1; position <= config.positions; position += 1) {
           const locationCode = code(config.zone, aisle, rack, level, position);
-          if (existingCodes.has(locationCode)) continue;
+          const payload = {
+            warehouseId: warehouse.id,
+            code: locationCode,
+            name: `Zona ${config.zone} / Pasillo ${pad(aisle)} / Rack ${pad(rack)} / Nivel ${pad(level)} / Posicion ${pad(position)}`,
+            zone: config.zone,
+            aisle: pad(aisle),
+            rack: pad(rack),
+            level: pad(level),
+            position: pad(position),
+            kind: 'STORAGE',
+          };
+          const existing = existingByCode.get(locationCode);
+          if (existing) {
+            const needsUpdate =
+              existing.zone !== payload.zone ||
+              existing.aisle !== payload.aisle ||
+              existing.rack !== payload.rack ||
+              existing.level !== payload.level ||
+              existing.position !== payload.position ||
+              existing.kind !== payload.kind;
+            if (!needsUpdate) continue;
+            await rawApi(`/locations/${existing.id}`, token, company.id, {
+              method: 'PUT',
+              body: JSON.stringify(payload),
+            });
+            changed += 1;
+            continue;
+          }
           await rawApi('/locations', token, company.id, {
             method: 'POST',
-            body: JSON.stringify({
-              warehouseId: warehouse.id,
-              code: locationCode,
-              name: `Zona ${config.zone} / Pasillo ${pad(aisle)} / Rack ${pad(rack)} / Nivel ${pad(level)} / Posicion ${pad(position)}`,
-              zone: config.zone,
-              aisle: pad(aisle),
-              rack: pad(rack),
-              level: pad(level),
-              position: pad(position),
-              kind: 'STORAGE',
-            }),
+            body: JSON.stringify(payload),
           });
-          created += 1;
+          changed += 1;
         }
       }
     }
   }
-  return created;
+  return changed;
 }
 
 async function main() {
@@ -94,7 +121,7 @@ async function main() {
       : { zone: 'A', aisles: 2, racks: 3, levels: 3, positions: 4 };
     total += await createLayout(token, company, config);
   }
-  console.log(`Layout generado por API: ${total} ubicaciones nuevas.`);
+  console.log(`Layout generado por API: ${total} ubicaciones creadas o actualizadas.`);
 }
 
 main().catch((error) => {

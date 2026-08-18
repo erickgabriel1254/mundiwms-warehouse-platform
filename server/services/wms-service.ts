@@ -1309,6 +1309,12 @@ export async function saveLocation(body: unknown, companyId: string, id?: string
     warehouseId: data.warehouseId,
     code: data.code.trim().toUpperCase(),
     name: data.name.trim(),
+    zone: data.zone.trim(),
+    aisle: data.aisle.trim(),
+    rack: data.rack.trim(),
+    level: data.level.trim(),
+    position: data.position.trim(),
+    kind: data.kind,
   };
   return id ? prisma.location.update({
     where: { id },
