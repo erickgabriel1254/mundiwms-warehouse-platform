@@ -1378,17 +1378,21 @@ export async function listUsers(roleCode: string) {
 export async function saveUser(body: unknown, roleCode: string, id?: string) {
   assertAdmin(roleCode);
   const data = userSchema.parse(body);
-  const payload: Prisma.UserUpdateInput & Prisma.UserCreateInput = {
+  const basePayload = {
     name: data.name.trim(),
     email: data.email.trim().toLowerCase(),
     isActive: data.isActive,
     role: { connect: { id: data.roleId } },
-    ...(data.password ? { passwordHash: hashPassword(data.password) } : {}),
   };
   if (!id && !data.password) throw new Error('La contrasena es obligatoria para usuarios nuevos');
-  return id
-    ? prisma.user.update({ where: { id }, data: payload, include: { role: true } })
-    : prisma.user.create({ data: payload, include: { role: true } });
+  if (id) {
+    const updatePayload: Prisma.UserUpdateInput = {
+      ...basePayload,
+      ...(data.password ? { passwordHash: hashPassword(data.password) } : {}),
+    };
+    return prisma.user.update({ where: { id }, data: updatePayload, include: { role: true } });
+  }
+  return prisma.user.create({ data: { ...basePayload, passwordHash: hashPassword(data.password) }, include: { role: true } });
 }
 
 export async function deleteUser(id: string, roleCode: string, currentUserId: string) {
