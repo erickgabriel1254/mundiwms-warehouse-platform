@@ -122,19 +122,20 @@ const adjustmentSchema = z.object({
 type Db = PrismaClient | Prisma.TransactionClient;
 
 const DEFAULT_COMPANY_ID = 'company_ferremayor';
+const LEGACY_COMPANY_CODES = ['MUNDIMAQUINAS', 'SIRUMAZ'];
 
 export async function resolveCompanyId(rawCompanyId?: string | string[]) {
   const requested = Array.isArray(rawCompanyId) ? rawCompanyId[0] : rawCompanyId;
   if (requested) {
     const company = await prisma.company.findUnique({ where: { id: requested } });
-    if (company) return company.id;
+    if (company && !LEGACY_COMPANY_CODES.includes(company.code)) return company.id;
   }
-  const fallback = await prisma.company.findFirst({ orderBy: { name: 'asc' } });
+  const fallback = await prisma.company.findFirst({ where: { code: { notIn: LEGACY_COMPANY_CODES } }, orderBy: { name: 'asc' } });
   return fallback?.id ?? DEFAULT_COMPANY_ID;
 }
 
 export async function listCompanies() {
-  return prisma.company.findMany({ orderBy: { name: 'asc' } });
+  return prisma.company.findMany({ where: { code: { notIn: LEGACY_COMPANY_CODES } }, orderBy: { name: 'asc' } });
 }
 
 function cleanSerials(serials: string[]) {
