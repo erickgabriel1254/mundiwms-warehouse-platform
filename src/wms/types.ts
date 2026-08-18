@@ -1,6 +1,6 @@
 export type RoleCode = 'ADMIN' | 'OPERATOR' | 'SUPERVISOR';
 export type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'BLOCKED' | 'DISPATCHED' | 'SHIPPED' | 'RETURNING';
-export type OrderStatus = 'DRAFT' | 'PENDING' | 'REQUESTED' | 'RECEIVED' | 'RESERVED' | 'DISPATCHED' | 'SHIPPED' | 'CANCELLED';
+export type OrderStatus = 'DRAFT' | 'PENDING' | 'REQUESTED' | 'PARTIAL' | 'RECEIVED' | 'RESERVED' | 'DISPATCHED' | 'SHIPPED' | 'CANCELLED';
 
 export type UserSession = {
   id: string;
@@ -131,6 +131,7 @@ export type OrderItem = {
   locationId?: string | null;
   location?: Location | null;
   quantity: number;
+  unitCost?: number | string;
   serialNumbers: string[];
 };
 
@@ -144,6 +145,7 @@ export type InboundOrder = {
   warehouse: Warehouse;
   locationId: string;
   location: Location;
+  importOrderId?: string | null;
   purchaseOrder?: string | null;
   status: OrderStatus;
   notes?: string;
@@ -166,7 +168,20 @@ export type ImportOrder = {
   notes?: string;
   createdAt: string;
   createdBy?: AdminUser | null;
-  items: (Omit<OrderItem, 'serialNumbers'> & { serialNumbers?: string[] })[];
+  items: (Omit<OrderItem, 'serialNumbers'> & { serialNumbers?: string[]; receivedQuantity?: number })[];
+};
+
+export type AuditLog = {
+  id: string;
+  companyId?: string | null;
+  userId?: string | null;
+  action: string;
+  entity: string;
+  entityId?: string | null;
+  summary: string;
+  metadata?: unknown;
+  createdAt: string;
+  user?: UserSession | null;
 };
 
 export type OutboundOrder = {

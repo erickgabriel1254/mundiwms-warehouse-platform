@@ -31,6 +31,7 @@ model User {
   outbound     OutboundOrder[]
   movements    KardexMovement[]
   adjustments  InventoryAdjustment[]
+  auditLogs    AuditLog[]
 
   @@map("users")
 }
@@ -47,6 +48,7 @@ model Company {
   inboundOrders  InboundOrder[]
   importOrders   ImportOrder[]
   outboundOrders OutboundOrder[]
+  auditLogs      AuditLog[]
   createdAt      DateTime        @default(now())
 
   @@map("companies")
@@ -237,6 +239,8 @@ model InboundOrder {
   warehouse   Warehouse          @relation(fields: [warehouseId], references: [id])
   locationId  String
   location    Location           @relation(fields: [locationId], references: [id])
+  importOrderId String?
+  importOrder   ImportOrder?     @relation(fields: [importOrderId], references: [id])
   purchaseOrder String?
   status      String             @default("DRAFT")
   notes       String?
@@ -267,6 +271,7 @@ model ImportOrder {
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   items         ImportOrderItem[]
+  inboundOrders InboundOrder[]
 
   @@map("import_orders")
 }
@@ -278,6 +283,7 @@ model ImportOrderItem {
   productId String
   product   Product     @relation(fields: [productId], references: [id])
   quantity  Int
+  receivedQuantity Int   @default(0)
 
   @@map("import_order_items")
 }
@@ -291,6 +297,7 @@ model InboundOrderItem {
   locationId    String?
   location      Location?    @relation(fields: [locationId], references: [id])
   quantity      Int
+  unitCost      Decimal      @default(0) @db.Decimal(12, 2)
   serialNumbers String[]     @default([])
 
   @@map("inbound_order_items")
@@ -374,4 +381,22 @@ model InventoryAdjustment {
   createdAt       DateTime       @default(now())
 
   @@map("inventory_adjustments")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  summary   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
 }

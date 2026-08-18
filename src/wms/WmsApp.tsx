@@ -46,6 +46,7 @@ import type {
   ImportOrder,
   InboundOrder,
   AdminUser,
+  AuditLog,
   InventoryBalance,
   InventoryUnit,
   KardexMovement,
@@ -87,6 +88,7 @@ const statusLabels: Record<string, string> = {
   DRAFT: 'Borrador',
   PENDING: 'Por ingresar',
   REQUESTED: 'Pedido generado',
+  PARTIAL: 'Recibido parcial',
   RECEIVED: 'Ingresado',
   CANCELLED: 'Cancelada',
 };
@@ -1900,6 +1902,7 @@ type OrderPayload = {
   warehouseId: string;
   locationId: string;
   purchaseOrder?: string;
+  importOrderId?: string;
   status: string;
   notes: string;
   carrierName?: string;
@@ -1942,6 +1945,8 @@ function OrderReview({
               <th>SKU</th>
               <th>Descripcion</th>
               <th>Cantidad</th>
+              {mode === 'inbound' ? <th>Costo unit.</th> : null}
+              {mode === 'inbound' ? <th>Total</th> : null}
               <th>Series</th>
             </tr>
           </thead>
@@ -1953,6 +1958,8 @@ function OrderReview({
                   <td>{product?.sku ?? '-'}</td>
                   <td>{product?.name ?? '-'}</td>
                   <td>{item.quantity}</td>
+                  {mode === 'inbound' ? <td>${Number(item.unitCost ?? product?.purchasePrice ?? 0).toFixed(2)}</td> : null}
+                  {mode === 'inbound' ? <td>${(Number(item.unitCost ?? product?.purchasePrice ?? 0) * item.quantity).toFixed(2)}</td> : null}
                   <td>{item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
                 </tr>
               );
@@ -2047,6 +2054,8 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
                 <th>SKU</th>
                 <th>Descripcion</th>
                 <th>Cantidad</th>
+                {type === 'inbound' ? <th>Costo unit.</th> : null}
+                {type === 'inbound' ? <th>Total</th> : null}
                 <th>Series</th>
               </tr>
             </thead>
@@ -2056,6 +2065,8 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
                   <td>{item.product?.sku ?? '-'}</td>
                   <td>{item.product?.name ?? '-'}</td>
                   <td>{item.quantity}</td>
+                  {type === 'inbound' ? <td>${Number(item.unitCost ?? item.product?.purchasePrice ?? 0).toFixed(2)}</td> : null}
+                  {type === 'inbound' ? <td>${(Number(item.unitCost ?? item.product?.purchasePrice ?? 0) * item.quantity).toFixed(2)}</td> : null}
                   <td>{item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
                 </tr>
               ))}
@@ -2065,6 +2076,65 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
       </div>
     </Modal>
   );
+}
+
+function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | OutboundOrder) {
+  const party = 'supplier' in order ? order.supplier : order.client;
+  const rows = order.items
+    .map((item) => {
+      const unitCost = Number(item.unitCost ?? item.product?.purchasePrice ?? 0);
+      return `
+        <tr>
+          <td>${item.product?.sku ?? '-'}</td>
+          <td>${item.product?.name ?? '-'}</td>
+          <td>${item.quantity}</td>
+          ${type === 'inbound' ? `<td>$${unitCost.toFixed(2)}</td><td>$${(unitCost * item.quantity).toFixed(2)}</td>` : ''}
+          <td>${item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
+        </tr>
+      `;
+    })
+    .join('');
+  const popup = window.open('', '_blank', 'width=900,height=700');
+  if (!popup) return toast.error('El navegador bloqueo la ventana del PDF');
+  popup.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>${order.orderNo}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
+          h1 { margin: 0 0 6px; font-size: 22px; }
+          .meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 20px; margin: 18px 0; font-size: 13px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #d1d5db; padding: 9px 10px; text-align: left; font-size: 13px; }
+          th { background: #f3f4f6; text-transform: uppercase; }
+        </style>
+      </head>
+      <body>
+        <h1>${type === 'inbound' ? 'Recepcion' : 'Despacho'} ${order.orderNo}</h1>
+        <div class="meta">
+          <div><strong>${type === 'inbound' ? 'Proveedor' : 'Cliente'}:</strong> ${party.name}</div>
+          <div><strong>RUC:</strong> ${party.taxId}</div>
+          <div><strong>Bodega:</strong> ${order.warehouse.name}</div>
+          <div><strong>Estado:</strong> ${statusLabels[order.status] ?? order.status}</div>
+          <div><strong>Orden de compra:</strong> ${order.purchaseOrder || '-'}</div>
+          <div><strong>Usuario:</strong> ${order.createdBy?.name ?? '-'}</div>
+          <div><strong>Fecha:</strong> ${new Date(order.createdAt).toLocaleString()}</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th><th>Descripcion</th><th>Cantidad</th>${type === 'inbound' ? '<th>Costo unit.</th><th>Total</th>' : ''}<th>Series</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+  popup.print();
 }
 
 function OrderForm({
@@ -2108,6 +2178,7 @@ function OrderForm({
           productId: item.productId,
           quantity: item.quantity,
           locationId: item.locationId ?? defaultProductLocation,
+          unitCost: item.unitCost ?? item.product?.purchasePrice ?? 0,
           serialNumbers: item.serialNumbers,
         }))
       : initialDraft?.items?.length
@@ -2115,11 +2186,13 @@ function OrderForm({
             productId: item.productId,
             quantity: item.quantity,
             locationId: item.locationId ?? getProductDefaultLocation(catalogs, item.productId, defaultWarehouse) ?? defaultProductLocation,
+            unitCost: item.unitCost ?? catalogs.products.find((product) => product.id === item.productId)?.purchasePrice ?? 0,
             serialNumbers: item.serialNumbers ?? [],
           }))
-      : [{ productId: defaultProductId, quantity: 1, locationId: defaultProductLocation, serialNumbers: [] }],
+      : [{ productId: defaultProductId, quantity: 1, locationId: defaultProductLocation, unitCost: 0, serialNumbers: [] }],
   );
   const [serialDrafts, setSerialDrafts] = useState<Record<number, string>>({});
+  const [scannerInput, setScannerInput] = useState('');
   const [reviewPayload, setReviewPayload] = useState<OrderPayload | null>(null);
   const estimatedOrderNo = useMemo(() => {
     if (initialOrder?.orderNo) return initialOrder.orderNo;
@@ -2128,6 +2201,58 @@ function OrderForm({
 
   const locations = catalogs.locations.filter((location) => location.warehouseId === warehouseId);
   const updateItem = (index: number, patch: Partial<OrderItem>) => setItems((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  const scanValue = (raw: string) => {
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized) return;
+    if (mode === 'outbound') {
+      const unit = availableUnits?.find((entry) => entry.serialNumber?.toLowerCase() === normalized && entry.warehouseId === warehouseId && entry.status === 'AVAILABLE');
+      if (unit?.serialNumber) {
+        setItems((current) => {
+          const index = current.findIndex((item) => item.productId === unit.productId);
+          if (index >= 0) {
+            return current.map((item, itemIndex) =>
+              itemIndex === index
+                ? {
+                    ...item,
+                    quantity: item.serialNumbers.includes(unit.serialNumber!) ? item.quantity : item.serialNumbers.length + 1,
+                    serialNumbers: item.serialNumbers.includes(unit.serialNumber!) ? item.serialNumbers : [...item.serialNumbers, unit.serialNumber!],
+                  }
+                : item,
+            );
+          }
+          return [...current.filter((item) => item.productId), { productId: unit.productId, quantity: 1, locationId: unit.locationId, serialNumbers: [unit.serialNumber!] }];
+        });
+        setScannerInput('');
+        return;
+      }
+    }
+    const product = catalogs.products.find(
+      (entry) =>
+        (!mode || mode === 'inbound' || entry.status === 'ACTIVE') &&
+        (entry.sku.toLowerCase() === normalized ||
+          entry.barcode?.toLowerCase() === normalized ||
+          entry.barcodes?.some((barcode) => barcode.toLowerCase() === normalized)),
+    );
+    if (!product) {
+      toast.error('No se encontro SKU, codigo de barra o serie');
+      return;
+    }
+    setItems((current) => {
+      const index = current.findIndex((item) => item.productId === product.id && !product.managesSerial);
+      if (index >= 0) return current.map((item, itemIndex) => (itemIndex === index ? { ...item, quantity: item.quantity + 1 } : item));
+      return [
+        ...current.filter((item) => item.productId),
+        {
+          productId: product.id,
+          quantity: 1,
+          locationId: getProductDefaultLocation(catalogs, product.id, warehouseId) ?? locationId,
+          unitCost: product.purchasePrice,
+          serialNumbers: [],
+        },
+      ];
+    });
+    setScannerInput('');
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const intent = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'draft' ? 'draft' : 'final';
@@ -2152,6 +2277,7 @@ function OrderForm({
       ...(mode === 'inbound' ? { supplierId: partyId } : { clientId: partyId }),
       warehouseId,
       locationId,
+      importOrderId: initialDraft?.importOrderId,
       purchaseOrder,
       status: intent === 'draft' ? 'DRAFT' : mode === 'inbound' ? 'PENDING' : 'DISPATCHED',
       notes,
@@ -2233,6 +2359,21 @@ function OrderForm({
         Observacion
         <textarea className="wms-textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
       </label>
+      <label className="wms-label wms-scan-panel">
+        Escaner rapido
+        <input
+          className="wms-input"
+          value={scannerInput}
+          placeholder={mode === 'outbound' ? 'Escanee SKU, codigo de barra o serie' : 'Escanee SKU o codigo de barra'}
+          onChange={(event) => setScannerInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            scanValue(scannerInput);
+          }}
+        />
+        <span>Presione Enter despues del escaneo para agregar o sumar cantidades.</span>
+      </label>
       <div className="wms-grid">
         {items.map((item, index) => {
           const product = catalogs.products.find((entry) => entry.id === item.productId);
@@ -2248,6 +2389,7 @@ function OrderForm({
                     updateItem(index, {
                       productId,
                       locationId: getProductDefaultLocation(catalogs, productId, warehouseId) ?? locationId,
+                      unitCost: catalogs.products.find((entry) => entry.id === productId)?.purchasePrice ?? 0,
                       serialNumbers: [],
                     })
                   }
@@ -2256,6 +2398,12 @@ function OrderForm({
                   Cantidad
                   <input className="wms-input" type="number" min={1} value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) })} />
                 </label>
+                {mode === 'inbound' ? (
+                  <label className="wms-label">
+                    Costo unit.
+                    <input className="wms-input" type="number" min={0} step="0.01" value={Number(item.unitCost ?? product?.purchasePrice ?? 0)} onChange={(event) => updateItem(index, { unitCost: Number(event.target.value) })} />
+                  </label>
+                ) : null}
                 {mode === 'outbound' ? (
                   <label className="wms-label">
                     Disponible bodega
@@ -2338,7 +2486,7 @@ function OrderForm({
         })}
       </div>
       <div className="wms-actions justify-between">
-        <button type="button" className="wms-button" onClick={() => setItems((current) => [...current, { productId: '', quantity: 1, locationId, serialNumbers: [] }])}>
+        <button type="button" className="wms-button" onClick={() => setItems((current) => [...current, { productId: '', quantity: 1, locationId, unitCost: 0, serialNumbers: [] }])}>
           Agregar producto
         </button>
         <div className="wms-actions">
@@ -2367,7 +2515,7 @@ function InboundPage() {
   const catalogs = useLoad(() => wmsApi.catalogs(), []);
   const orders = useLoad(() => wmsApi.inbound(), []);
   const importOrders = useLoad(() => wmsApi.importOrders(), []);
-  const pendingImportOrders = (importOrders.data ?? []).filter((order) => order.status === 'REQUESTED');
+  const pendingImportOrders = (importOrders.data ?? []).filter((order) => ['REQUESTED', 'PARTIAL'].includes(order.status));
   const refresh = () => {
     orders.refresh();
     importOrders.refresh();
@@ -2398,7 +2546,7 @@ function InboundPage() {
               { header: 'Pedido', accessorKey: 'orderNo' },
               { header: 'Proveedor', cell: ({ row }) => row.original.supplier.name },
               { header: 'OC', cell: ({ row }) => row.original.purchaseOrder || '-' },
-              { header: 'Items', cell: ({ row }) => row.original.items.map((item) => `${item.product?.sku} x${item.quantity}`).join(', ') },
+              { header: 'Items pendientes', cell: ({ row }) => row.original.items.map((item) => `${item.product?.sku} x${Math.max(0, item.quantity - (item.receivedQuantity ?? 0))}`).join(', ') },
               { header: 'Fecha', cell: ({ row }) => new Date(row.original.createdAt).toLocaleString() },
               {
                 header: 'Accion',
@@ -2431,16 +2579,18 @@ function InboundPage() {
             initialOrder={prefillOrder}
             initialDraft={sourceImportOrder ? {
               supplierId: sourceImportOrder.supplierId,
+              importOrderId: sourceImportOrder.id,
               purchaseOrder: sourceImportOrder.purchaseOrder ?? '',
               notes: `Recepcion generada desde pedido ${sourceImportOrder.orderNo}`,
-              items: sourceImportOrder.items.map((item) => ({ productId: item.productId, quantity: item.quantity, serialNumbers: [] })),
+              items: sourceImportOrder.items
+                .map((item) => ({ productId: item.productId, quantity: Math.max(0, item.quantity - (item.receivedQuantity ?? 0)), unitCost: item.product?.purchasePrice ?? 0, serialNumbers: [] }))
+                .filter((item) => item.quantity > 0),
             } : null}
             onCancel={() => { setCreating(false); setPrefillOrder(null); setSourceImportOrder(null); }}
             onSubmit={async (payload) => {
               const order = await wmsApi.saveInbound(payload, prefillOrder?.id);
               if (payload.status === 'PENDING') {
                 await wmsApi.confirmInbound(order.id);
-                if (sourceImportOrder) await wmsApi.completeImportOrder(sourceImportOrder.id);
                 toast.success('Recepcion ingresada al inventario');
               } else {
                 toast.success('Recepcion guardada como borrador');
@@ -2572,6 +2722,9 @@ function OrdersTable({
             header: 'Acciones',
             cell: ({ row }) => (
               <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
+                <button className="wms-button" onClick={() => printOrderPdf(type, row.original)}>
+                  <FileDown size={16} /> PDF
+                </button>
                 {['DRAFT', 'PENDING', 'RESERVED'].includes(row.original.status) ? (
                   <button className="wms-button" onClick={() => onEdit(row.original)}>
                     Editar
@@ -2618,6 +2771,8 @@ function printImportOrderPdf(order: ImportOrder) {
           <td>${item.product?.sku ?? '-'}</td>
           <td>${item.product?.name ?? '-'}</td>
           <td>${item.quantity}</td>
+          <td>${item.receivedQuantity ?? 0}</td>
+          <td>${Math.max(0, item.quantity - (item.receivedQuantity ?? 0))}</td>
         </tr>
       `,
     )
@@ -2652,7 +2807,7 @@ function printImportOrderPdf(order: ImportOrder) {
         </div>
         <table>
           <thead>
-            <tr><th>SKU</th><th>Descripcion</th><th>Cantidad pedida</th></tr>
+            <tr><th>SKU</th><th>Descripcion</th><th>Cantidad pedida</th><th>Recibido</th><th>Pendiente</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
@@ -2762,7 +2917,7 @@ function ImportOrdersPage() {
             { header: 'Proveedor', cell: ({ row }) => row.original.supplier.name },
             { header: 'OC', cell: ({ row }) => row.original.purchaseOrder || '-' },
             { header: 'Estado', cell: ({ row }) => <Badge value={row.original.status} /> },
-            { header: 'Items', cell: ({ row }) => row.original.items.map((item) => `${item.product?.sku} x${item.quantity}`).join(', ') },
+            { header: 'Items', cell: ({ row }) => row.original.items.map((item) => `${item.product?.sku} ${item.receivedQuantity ?? 0}/${item.quantity}`).join(', ') },
             { header: 'Fecha', cell: ({ row }) => new Date(row.original.createdAt).toLocaleString() },
             {
               header: 'Acciones',
@@ -3296,6 +3451,10 @@ function ReportsPage() {
             <option value="movements">Movimientos por fecha</option>
             <option value="inbound-suppliers">Entradas por proveedor</option>
             <option value="outbound-clients">Salidas por cliente</option>
+            <option value="inventory-valuation">Valoracion de inventario</option>
+            <option value="top-moving">Productos con mas movimiento</option>
+            <option value="inbound-costs">Costos por recepcion</option>
+            <option value="audit-log">Auditoria del sistema</option>
           </select>
           <button className="wms-button" onClick={refresh}>Actualizar</button>
         </div>
@@ -3318,6 +3477,31 @@ function normalizeReportRows(type: string, data: unknown[]): Record<string, unkn
   }
   if (type === 'outbound-clients') {
     return (data as OutboundOrder[]).map((row) => ({ documento: row.orderNo, orden_compra: row.purchaseOrder ?? '', cliente: row.client.name, estado: statusLabels[row.status], items: row.items.length, fecha: row.createdAt }));
+  }
+  if (type === 'inbound-costs') {
+    return (data as InboundOrder[]).flatMap((row) =>
+      row.items.map((item) => ({
+        documento: row.orderNo,
+        proveedor: row.supplier.name,
+        bodega: row.warehouse.name,
+        sku: item.product?.sku ?? '',
+        producto: item.product?.name ?? '',
+        cantidad: item.quantity,
+        costo_unitario: Number(item.unitCost ?? item.product?.purchasePrice ?? 0),
+        total: Number(item.unitCost ?? item.product?.purchasePrice ?? 0) * item.quantity,
+        usuario: row.createdBy?.name ?? '',
+        fecha: row.confirmedAt ?? row.createdAt,
+      })),
+    );
+  }
+  if (type === 'audit-log') {
+    return (data as AuditLog[]).map((row) => ({
+      fecha: row.createdAt,
+      usuario: row.user?.name ?? '',
+      accion: row.action,
+      entidad: row.entity,
+      resumen: row.summary,
+    }));
   }
   return data as Record<string, unknown>[];
 }

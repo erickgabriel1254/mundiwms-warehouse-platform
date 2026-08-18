@@ -309,6 +309,25 @@
   gap: 10px;
 }
 
+.wms-scan-panel {
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  padding: 12px;
+}
+
+.wms-scan-panel .wms-input {
+  border-color: #fdba74;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.wms-scan-panel span {
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .wms-table.compact {
   min-width: 640px;
 }

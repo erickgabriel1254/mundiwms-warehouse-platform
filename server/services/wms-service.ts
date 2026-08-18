@@ -80,6 +80,7 @@ const orderItemSchema = z.object({
   productId: z.string().min(1),
   quantity: z.coerce.number().int().positive(),
   locationId: z.string().optional(),
+  unitCost: z.coerce.number().min(0).optional(),
   serialNumbers: z.array(z.string().trim().min(1)).default([]),
 });
 
@@ -90,6 +91,7 @@ const inboundSchema = z.object({
   status: z.enum(['DRAFT', 'PENDING']).default('DRAFT'),
   notes: z.string().optional(),
   purchaseOrder: z.string().optional(),
+  importOrderId: z.string().optional(),
   carrierName: z.string().optional(),
   guideNumber: z.string().optional(),
   items: z.array(orderItemSchema).min(1),
@@ -189,6 +191,43 @@ async function rebuildBalances(db: Db) {
 
 function nextOrderNo(prefix: 'IN' | 'OUT' | 'PED') {
   return `${prefix}-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+}
+
+async function auditLog({
+  companyId,
+  userId,
+  action,
+  entity,
+  entityId,
+  summary,
+  metadata,
+}: {
+  companyId?: string | null;
+  userId?: string | null;
+  action: string;
+  entity: string;
+  entityId?: string | null;
+  summary: string;
+  metadata?: Prisma.InputJsonValue;
+}) {
+  await prisma.auditLog.create({
+    data: {
+      companyId: companyId ?? null,
+      userId: userId ?? null,
+      action,
+      entity,
+      entityId: entityId ?? null,
+      summary,
+      metadata: metadata ?? Prisma.JsonNull,
+    },
+  });
+}
+
+function orderItemsSummary(items: Array<{ productId: string; quantity: number }>) {
+  return {
+    lines: items.length,
+    quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+  };
 }
 
 function normalizeCategoryCode(value: string) {
@@ -579,15 +618,17 @@ export async function saveImportOrder(body: unknown, userId: string, companyId: 
 
   if (id) {
     const order = await prisma.importOrder.findFirst({ where: { id, companyId } });
-    if (!order || order.status === 'CANCELLED') throw new Error('El pedido no puede editarse');
-    return prisma.importOrder.update({
+    if (!order || !['DRAFT', 'REQUESTED'].includes(order.status)) throw new Error('El pedido no puede editarse');
+    const updated = await prisma.importOrder.update({
       where: { id },
       data: { ...payload, items: { deleteMany: {}, create: items } },
       include: { supplier: true, createdBy: { include: { role: true } }, items: { include: { product: true } } },
     });
+    await auditLog({ companyId, userId, action: 'UPDATE', entity: 'ImportOrder', entityId: id, summary: `Pedido ${updated.orderNo} actualizado`, metadata: orderItemsSummary(items) });
+    return updated;
   }
 
-  return prisma.importOrder.create({
+  const created = await prisma.importOrder.create({
     data: {
       orderNo: nextOrderNo('PED'),
       createdById: userId,
@@ -596,6 +637,8 @@ export async function saveImportOrder(body: unknown, userId: string, companyId: 
     },
     include: { supplier: true, createdBy: { include: { role: true } }, items: { include: { product: true } } },
   });
+  await auditLog({ companyId, userId, action: 'CREATE', entity: 'ImportOrder', entityId: created.id, summary: `Pedido ${created.orderNo} generado`, metadata: orderItemsSummary(items) });
+  return created;
 }
 
 export async function cancelImportOrder(id: string, companyId: string) {
@@ -612,14 +655,16 @@ export async function completeImportOrder(id: string, companyId: string) {
 
 export async function saveInbound(body: unknown, userId: string, companyId: string, id?: string) {
   const data = inboundSchema.parse(body);
-  const [supplier, warehouse, location] = await Promise.all([
+  const [supplier, warehouse, location, importOrder] = await Promise.all([
     prisma.supplier.findFirst({ where: { id: data.supplierId, companyId } }),
     prisma.warehouse.findFirst({ where: { id: data.warehouseId, companyId } }),
     prisma.location.findFirst({ where: { id: data.locationId, warehouse: { companyId } } }),
+    data.importOrderId ? prisma.importOrder.findFirst({ where: { id: data.importOrderId, companyId } }) : Promise.resolve(null),
   ]);
   if (!supplier) throw new Error('Proveedor no corresponde a la empresa seleccionada');
   if (!warehouse) throw new Error('Bodega no corresponde a la empresa seleccionada');
   if (!location) throw new Error('Ubicacion no corresponde a la empresa seleccionada');
+  if (data.importOrderId && !importOrder) throw new Error('Pedido de importacion no corresponde a la empresa seleccionada');
   for (const item of data.items) {
     const product = await prisma.product.findUnique({ where: { id: item.productId } });
     if (!product) throw new Error('Producto no encontrado');
@@ -633,13 +678,14 @@ export async function saveInbound(body: unknown, userId: string, companyId: stri
   if (id) {
     const order = await prisma.inboundOrder.findFirst({ where: { id, companyId } });
     if (!order || !['DRAFT', 'PENDING'].includes(order.status)) throw new Error('La orden no puede editarse');
-    return prisma.inboundOrder.update({
+    const updated = await prisma.inboundOrder.update({
       where: { id },
       data: {
         companyId,
         supplierId: data.supplierId,
         warehouseId: data.warehouseId,
         locationId: data.locationId,
+        importOrderId: data.importOrderId || null,
         status: data.status,
         notes: data.notes,
         purchaseOrder: data.purchaseOrder?.trim() || null,
@@ -651,21 +697,25 @@ export async function saveInbound(body: unknown, userId: string, companyId: stri
             productId: item.productId,
             quantity: item.quantity,
             locationId: item.locationId || null,
+            unitCost: new Prisma.Decimal(item.unitCost ?? 0),
             serialNumbers: cleanSerials(item.serialNumbers),
           })),
         },
       },
       include: { supplier: true, warehouse: true, location: true, createdBy: { include: { role: true } }, items: { include: { product: true, location: true } } },
     });
+    await auditLog({ companyId, userId, action: 'UPDATE', entity: 'InboundOrder', entityId: id, summary: `Recepcion ${updated.orderNo} actualizada`, metadata: orderItemsSummary(data.items) });
+    return updated;
   }
 
-  return prisma.inboundOrder.create({
+  const created = await prisma.inboundOrder.create({
     data: {
       orderNo: nextOrderNo('IN'),
       companyId,
       supplierId: data.supplierId,
       warehouseId: data.warehouseId,
       locationId: data.locationId,
+      importOrderId: data.importOrderId || null,
       status: data.status,
       notes: data.notes,
       purchaseOrder: data.purchaseOrder?.trim() || null,
@@ -677,20 +727,26 @@ export async function saveInbound(body: unknown, userId: string, companyId: stri
           productId: item.productId,
           quantity: item.quantity,
           locationId: item.locationId || null,
+          unitCost: new Prisma.Decimal(item.unitCost ?? 0),
           serialNumbers: cleanSerials(item.serialNumbers),
         })),
       },
     },
     include: { supplier: true, warehouse: true, location: true, createdBy: { include: { role: true } }, items: { include: { product: true, location: true } } },
   });
+  await auditLog({ companyId, userId, action: 'CREATE', entity: 'InboundOrder', entityId: created.id, summary: `Recepcion ${created.orderNo} creada`, metadata: orderItemsSummary(data.items) });
+  return created;
 }
 
 export async function confirmInbound(id: string, userId: string, companyId: string) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.inboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true, location: true } } } });
     if (!order || !['DRAFT', 'PENDING'].includes(order.status)) throw new Error('Recepcion no confirmable');
 
     for (const item of order.items) {
+      if (item.unitCost.gt(0)) {
+        await tx.product.update({ where: { id: item.productId }, data: { purchasePrice: item.unitCost } });
+      }
       const serials = cleanSerials(item.serialNumbers);
       if (item.product.managesSerial) {
         if (serials.length !== item.quantity) throw new Error(`Faltan series para ${item.product.sku}`);
@@ -751,16 +807,47 @@ export async function confirmInbound(id: string, userId: string, companyId: stri
         });
       }
     }
+    if (order.importOrderId) {
+      const importItems = await tx.importOrderItem.findMany({ where: { orderId: order.importOrderId } });
+      for (const item of order.items) {
+        const target = importItems.find((entry) => entry.productId === item.productId);
+        if (!target) throw new Error(`El producto ${item.product.sku} no pertenece al pedido de importacion`);
+        if (target.receivedQuantity + item.quantity > target.quantity) {
+          throw new Error(`La recepcion supera el pendiente del SKU ${item.product.sku}`);
+        }
+        await tx.importOrderItem.update({
+          where: { id: target.id },
+          data: { receivedQuantity: { increment: item.quantity } },
+        });
+      }
+      const updatedItems = await tx.importOrderItem.findMany({ where: { orderId: order.importOrderId } });
+      const allReceived = updatedItems.every((item) => item.receivedQuantity >= item.quantity);
+      await tx.importOrder.update({
+        where: { id: order.importOrderId },
+        data: { status: allReceived ? 'RECEIVED' : 'PARTIAL' },
+      });
+    }
     await tx.inboundOrder.update({ where: { id }, data: { status: 'RECEIVED', confirmedAt: new Date() } });
     await rebuildBalances(tx);
     return { ok: true };
   }, { timeout: 30000 });
+  await auditLog({
+    companyId,
+    userId,
+    action: 'CONFIRM',
+    entity: 'InboundOrder',
+    entityId: id,
+    summary: 'Recepcion confirmada e ingresada al inventario',
+  });
+  return result;
 }
 
-export async function cancelInbound(id: string, companyId: string) {
+export async function cancelInbound(id: string, companyId: string, userId?: string) {
   const order = await prisma.inboundOrder.findFirst({ where: { id, companyId } });
   if (!order || !['DRAFT', 'PENDING'].includes(order.status)) throw new Error('La orden no puede cancelarse');
-  return prisma.inboundOrder.update({ where: { id }, data: { status: 'CANCELLED' } });
+  const result = await prisma.inboundOrder.update({ where: { id }, data: { status: 'CANCELLED' } });
+  await auditLog({ companyId, userId, action: 'CANCEL', entity: 'InboundOrder', entityId: id, summary: `Recepcion ${result.orderNo} cancelada` });
+  return result;
 }
 
 export async function listOutbound(companyId: string) {
@@ -884,7 +971,7 @@ export async function saveOutbound(body: unknown, userId: string, companyId: str
 }
 
 export async function reserveOutbound(id: string, userId: string, companyId: string) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
     if (!order || order.status !== 'DRAFT') throw new Error('Solo se reservan ordenes en borrador');
     for (const item of order.items) {
@@ -937,6 +1024,8 @@ export async function reserveOutbound(id: string, userId: string, companyId: str
     await rebuildBalances(tx);
     return { ok: true };
   });
+  await auditLog({ companyId, userId, action: 'RESERVE', entity: 'OutboundOrder', entityId: id, summary: 'Stock reservado para despacho' });
+  return result;
 }
 
 export async function dispatchOutbound(id: string, userId: string, companyId: string) {
@@ -944,7 +1033,7 @@ export async function dispatchOutbound(id: string, userId: string, companyId: st
   if (current?.status === 'DRAFT') {
     await reserveOutbound(id, userId, companyId);
   }
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
     if (!order || !['DRAFT', 'RESERVED'].includes(order.status)) throw new Error('Orden no despachable');
     if (order.status === 'DRAFT') throw new Error('No se pudo reservar el stock antes del despacho');
@@ -1002,10 +1091,12 @@ export async function dispatchOutbound(id: string, userId: string, companyId: st
     await rebuildBalances(tx);
     return { ok: true };
   });
+  await auditLog({ companyId, userId, action: 'DISPATCH', entity: 'OutboundOrder', entityId: id, summary: 'Despacho confirmado' });
+  return result;
 }
 
 export async function shipOutbound(id: string, userId: string, companyId: string) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
     if (!order || order.status !== 'DISPATCHED') throw new Error('Solo se puede enviar una orden despachada');
 
@@ -1036,10 +1127,12 @@ export async function shipOutbound(id: string, userId: string, companyId: string
     await rebuildBalances(tx);
     return { ok: true };
   });
+  await auditLog({ companyId, userId, action: 'SHIP', entity: 'OutboundOrder', entityId: id, summary: 'Envio final confirmado' });
+  return result;
 }
 
-export async function cancelOutbound(id: string, companyId: string) {
-  return prisma.$transaction(async (tx) => {
+export async function cancelOutbound(id: string, companyId: string, userId?: string) {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
     if (!order || !['DRAFT', 'RESERVED', 'DISPATCHED'].includes(order.status)) throw new Error('La orden no puede cancelarse');
     if (['RESERVED', 'DISPATCHED'].includes(order.status)) {
@@ -1058,6 +1151,8 @@ export async function cancelOutbound(id: string, companyId: string) {
     }
     return tx.outboundOrder.update({ where: { id }, data: { status: 'CANCELLED' } });
   });
+  await auditLog({ companyId, userId, action: 'CANCEL', entity: 'OutboundOrder', entityId: id, summary: 'Despacho cancelado o liberado' });
+  return result;
 }
 
 export async function listKardex(query: URLSearchParams, companyId: string) {
@@ -1109,7 +1204,7 @@ export async function createAdjustment(body: unknown, userId: string, companyId:
     const toLocation = await prisma.location.findFirst({ where: { id: data.toLocationId, warehouse: { companyId } } });
     if (!toLocation) throw new Error('Ubicacion destino no corresponde a la empresa seleccionada');
   }
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const product = await tx.product.findUnique({ where: { id: data.productId } });
     if (!product) throw new Error('Producto no encontrado');
     let movementType = 'ADJUSTMENT_POSITIVE';
@@ -1230,6 +1325,8 @@ export async function createAdjustment(body: unknown, userId: string, companyId:
     await rebuildBalances(tx);
     return { ok: true };
   });
+  await auditLog({ companyId, userId, action: data.type, entity: 'InventoryAdjustment', entityId: data.productId, summary: data.reason, metadata: { quantity: data.quantity } });
+  return result;
 }
 
 export async function listContacts(type: 'clients' | 'suppliers', companyId: string) {
@@ -1271,10 +1368,12 @@ export async function deleteContact(type: 'clients' | 'suppliers', id: string, r
   return { ok: true, mode: 'DELETED' };
 }
 
-export async function saveWarehouse(body: unknown, companyId: string, id?: string) {
+export async function saveWarehouse(body: unknown, companyId: string, id?: string, userId?: string) {
   const data = warehouseSchema.parse(body);
   const payload = { code: data.code.trim().toUpperCase(), name: data.name.trim(), companyId };
-  return id ? prisma.warehouse.update({ where: { id }, data: payload }) : prisma.warehouse.create({ data: payload });
+  const result = id ? await prisma.warehouse.update({ where: { id }, data: payload }) : await prisma.warehouse.create({ data: payload });
+  await auditLog({ companyId, userId, action: id ? 'UPDATE' : 'CREATE', entity: 'Warehouse', entityId: result.id, summary: `Bodega ${result.name} ${id ? 'actualizada' : 'creada'}` });
+  return result;
 }
 
 export async function deleteWarehouse(id: string, companyId: string) {
@@ -1301,7 +1400,7 @@ export async function deleteWarehouse(id: string, companyId: string) {
   return { ok: true };
 }
 
-export async function saveLocation(body: unknown, companyId: string, id?: string) {
+export async function saveLocation(body: unknown, companyId: string, id?: string, userId?: string) {
   const data = locationSchema.parse(body);
   const warehouse = await prisma.warehouse.findFirst({ where: { id: data.warehouseId, companyId } });
   if (!warehouse) throw new Error('Bodega no corresponde a la empresa seleccionada');
@@ -1316,16 +1415,18 @@ export async function saveLocation(body: unknown, companyId: string, id?: string
     position: data.position.trim(),
     kind: data.kind,
   };
-  return id ? prisma.location.update({
+  const result = id ? await prisma.location.update({
     where: { id },
     data: payload,
     include: { warehouse: true },
-  }) : prisma.location.create({
+  }) : await prisma.location.create({
     data: {
       ...payload,
     },
     include: { warehouse: true },
   });
+  await auditLog({ companyId, userId, action: id ? 'UPDATE' : 'CREATE', entity: 'Location', entityId: result.id, summary: `Ubicacion ${result.code} ${id ? 'actualizada' : 'creada'}` });
+  return result;
 }
 
 export async function deleteLocation(id: string, companyId: string) {
@@ -1450,6 +1551,61 @@ export async function getReports(query: URLSearchParams, companyId: string) {
   }
   if (type === 'outbound-clients') {
     return prisma.outboundOrder.findMany({ where: { companyId }, include: { client: true, items: { include: { product: true } } }, orderBy: { createdAt: 'desc' } });
+  }
+  if (type === 'inventory-valuation') {
+    const balances = await prisma.inventoryBalance.findMany({
+      where: { warehouse: { companyId }, status: { in: ['AVAILABLE', 'RESERVED'] } },
+      include: { product: true, warehouse: true, location: true },
+      orderBy: { product: { sku: 'asc' } },
+    });
+    return balances.map((balance) => {
+      const unitCost = Number(balance.product.purchasePrice);
+      return {
+        sku: balance.product.sku,
+        producto: balance.product.name,
+        bodega: balance.warehouse.name,
+        ubicacion: balance.location.name,
+        estado: balance.status,
+        cantidad: balance.quantity,
+        costoUnitario: unitCost,
+        valorInventario: unitCost * balance.quantity,
+      };
+    });
+  }
+  if (type === 'top-moving') {
+    const movements = await prisma.kardexMovement.groupBy({
+      by: ['productId'],
+      where: { warehouse: { companyId } },
+      _count: { _all: true },
+      _sum: { quantity: true },
+      orderBy: { _count: { productId: 'desc' } },
+      take: 25,
+    });
+    const products = await prisma.product.findMany({ where: { id: { in: movements.map((movement) => movement.productId) } } });
+    return movements.map((movement) => {
+      const product = products.find((item) => item.id === movement.productId);
+      return {
+        sku: product?.sku ?? movement.productId,
+        producto: product?.name ?? '-',
+        movimientos: movement._count._all,
+        cantidadMovida: movement._sum.quantity ?? 0,
+      };
+    });
+  }
+  if (type === 'inbound-costs') {
+    return prisma.inboundOrder.findMany({
+      where: { companyId, status: 'RECEIVED' },
+      include: { supplier: true, warehouse: true, createdBy: true, items: { include: { product: true } } },
+      orderBy: { confirmedAt: 'desc' },
+    });
+  }
+  if (type === 'audit-log') {
+    return prisma.auditLog.findMany({
+      where: { companyId },
+      include: { user: { include: { role: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
   }
   return prisma.inventoryBalance.findMany({ where: { warehouse: { companyId } }, include: { product: true, warehouse: true, location: true }, orderBy: { product: { sku: 'asc' } } });
 }
