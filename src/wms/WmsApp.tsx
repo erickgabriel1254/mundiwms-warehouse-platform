@@ -385,7 +385,7 @@ function LoginPage() {
 
 function PageTitle({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div className="wms-page-title mb-5 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 className="text-2xl font-extrabold">{title}</h2>
         <p className="text-sm text-slate-500">{subtitle}</p>

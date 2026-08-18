@@ -428,6 +428,7 @@
 .wms-table-wrap {
   width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .wms-table {
@@ -846,7 +847,7 @@
 
 @media (max-width: 640px) {
   .wms-shell {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .wms-grid.cols-2,
@@ -855,24 +856,24 @@
   }
 
   .wms-header {
-    min-height: 52px;
-    gap: 6px;
-    padding: 8px 10px;
+    min-height: 46px;
+    gap: 5px;
+    padding: 6px 8px;
   }
 
   .wms-header-title {
     flex: 1 1 auto;
     min-width: 0;
-    gap: 8px;
+    gap: 6px;
   }
 
   .wms-header-actions {
     flex: 0 0 auto;
-    gap: 6px;
+    gap: 5px;
   }
 
   .wms-header h1 {
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.15;
   }
 
@@ -885,15 +886,15 @@
   }
 
   .wms-header-alert {
-    width: 34px;
-    min-height: 34px;
+    width: 30px;
+    min-height: 30px;
     padding: 0;
     justify-content: center;
   }
 
   .wms-company-select {
-    min-width: 112px;
-    max-width: 122px;
+    min-width: 92px;
+    max-width: 106px;
     gap: 0;
   }
 
@@ -902,18 +903,32 @@
   }
 
   .wms-company-select select {
-    min-height: 34px;
-    padding: 4px 8px;
-    font-size: 12px;
+    min-height: 30px;
+    padding: 3px 7px;
+    font-size: 11px;
     line-height: 1;
+    text-overflow: ellipsis;
   }
 
   .wms-content {
-    padding: 12px 10px;
+    padding: 10px 8px;
+  }
+
+  .wms-page-title {
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+
+  .wms-page-title > div {
+    min-width: 0;
+  }
+
+  .wms-page-title .wms-button {
+    flex: 1 1 150px;
   }
 
   .wms-content h2 {
-    font-size: 18px;
+    font-size: 17px;
     line-height: 1.15;
   }
 
@@ -922,36 +937,74 @@
   }
 
   .wms-card-header {
-    padding: 10px 12px;
+    align-items: flex-start;
+    padding: 9px 10px;
+  }
+
+  .wms-card-header h3 {
+    font-size: 14px;
+    line-height: 1.2;
   }
 
   .wms-card-body {
-    padding: 12px;
+    padding: 10px;
   }
 
   .wms-grid {
-    gap: 10px;
+    gap: 8px;
+  }
+
+  .wms-order-line-card {
+    gap: 8px;
+    padding: 9px;
   }
 
   .wms-order-line {
-    grid-template-columns: minmax(110px, 0.9fr) minmax(170px, 1.2fr) minmax(78px, 0.45fr) minmax(96px, 0.5fr) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 
   .wms-order-line.import {
-    grid-template-columns: minmax(110px, 0.9fr) minmax(170px, 1.2fr) minmax(88px, 0.45fr) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wms-product-picker,
+  .wms-contact-picker {
+    display: contents;
+  }
+
+  .wms-scan-panel {
+    padding: 9px;
+  }
+
+  .wms-scan-panel .wms-input {
+    font-size: 14px;
   }
 
   .wms-input,
   .wms-select,
   .wms-textarea,
   .wms-button {
-    min-height: 38px;
-    font-size: 14px;
+    min-height: 34px;
+    padding: 7px 9px;
+    font-size: 13px;
+  }
+
+  .wms-label {
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .wms-actions {
+    gap: 6px;
+  }
+
+  .wms-actions .wms-button {
+    flex: 1 1 auto;
   }
 
   .wms-table {
-    min-width: 720px;
+    min-width: 640px;
   }
 
   .wms-detail-grid {
@@ -960,6 +1013,15 @@
 
   .wms-location-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .wms-location-summary > div {
+    padding: 8px;
+  }
+
+  .wms-location-summary strong {
+    font-size: 18px;
   }
 
   .wms-map-header {
@@ -968,17 +1030,28 @@
   }
 
   .wms-rack {
-    min-width: 132px;
+    min-width: 118px;
+    padding: 8px;
   }
 
   .wms-slot-grid {
-    grid-template-columns: repeat(2, minmax(44px, 1fr));
+    grid-template-columns: repeat(2, minmax(38px, 1fr));
+    gap: 5px;
+  }
+
+  .wms-slot {
+    min-height: 40px;
+    font-size: 10px;
+  }
+
+  .wms-slot strong {
+    font-size: 12px;
   }
 
   .wms-table th,
   .wms-table td {
-    padding: 8px;
-    font-size: 13px;
+    padding: 7px;
+    font-size: 12px;
   }
 
   .wms-modal-backdrop {
@@ -993,16 +1066,86 @@
   }
 
   .wms-logo {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
   }
 
   .wms-brand {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
 
   .wms-nav a {
-    padding: 9px 10px;
-    font-size: 14px;
+    padding: 8px 9px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 420px) {
+  .wms-header {
+    min-height: 42px;
+    padding: 5px 6px;
+  }
+
+  .wms-drawer-toggle {
+    width: 30px;
+    min-height: 30px;
+    padding: 0;
+  }
+
+  .wms-header-title h1 {
+    max-width: 44px;
+  }
+
+  .wms-company-select {
+    min-width: 82px;
+    max-width: 94px;
+  }
+
+  .wms-company-select select {
+    min-height: 28px;
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+
+  .wms-header-alert {
+    width: 28px;
+    min-height: 28px;
+  }
+
+  .wms-content {
+    padding: 8px 6px;
+  }
+
+  .wms-page-title {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .wms-page-title .wms-button {
+    width: 100%;
+  }
+
+  .wms-order-line,
+  .wms-order-line.import {
+    grid-template-columns: 1fr;
+  }
+
+  .wms-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .wms-table {
+    min-width: 560px;
+  }
+
+  .wms-inner-table {
+    min-width: 560px;
+  }
+
+  .wms-card-header {
+    gap: 8px;
   }
 }
