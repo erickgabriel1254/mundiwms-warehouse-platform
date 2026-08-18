@@ -1330,14 +1330,96 @@ function WarehouseForm({ warehouse, onClose, onSaved }: { warehouse: WarehouseTy
   );
 }
 
+const locationKindLabels: Record<string, string> = {
+  STORAGE: 'Almacenamiento',
+  RECEIVING: 'Recepcion',
+  DISPATCH: 'Despacho',
+  BLOCKED: 'Bloqueados',
+};
+
+function locationLayoutCode(location: Pick<Location, 'zone' | 'aisle' | 'rack' | 'level' | 'position' | 'code'>) {
+  const parts = [
+    location.zone ? `Z${location.zone}` : '',
+    location.aisle ? `P${location.aisle}` : '',
+    location.rack ? `R${location.rack}` : '',
+    location.level ? `N${location.level}` : '',
+    location.position ? `U${location.position}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join('-').toUpperCase() : location.code;
+}
+
+function getLocationStats(location: Location) {
+  const balances = location.inventoryBalances ?? [];
+  const total = balances.reduce((sum, balance) => sum + balance.quantity, 0);
+  const available = balances.filter((balance) => balance.status === 'AVAILABLE').reduce((sum, balance) => sum + balance.quantity, 0);
+  const reserved = balances.filter((balance) => balance.status === 'RESERVED').reduce((sum, balance) => sum + balance.quantity, 0);
+  const products = new Set(balances.map((balance) => balance.product?.sku).filter(Boolean)).size;
+  return { total, available, reserved, products };
+}
+
+function compareLocationLayout(a: Location, b: Location) {
+  return [a.zone, a.aisle, a.rack, a.level, a.position, a.name].join('|').localeCompare([b.zone, b.aisle, b.rack, b.level, b.position, b.name].join('|'), 'es', { numeric: true });
+}
+
+function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void }) {
+  const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
+  const aisles = Array.from(new Set(warehouseLocations.map((location) => location.aisle || 'General'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  if (!warehouseLocations.length) {
+    return <div className="wms-empty-map">Sin ubicaciones creadas para esta bodega.</div>;
+  }
+
+  return (
+    <div className="wms-location-map">
+      {aisles.map((aisle) => {
+        const aisleLocations = warehouseLocations.filter((location) => (location.aisle || 'General') === aisle);
+        const racks = Array.from(new Set(aisleLocations.map((location) => location.rack || 'Sin rack'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+        return (
+          <section className="wms-aisle" key={aisle}>
+            <div className="wms-aisle-title">Pasillo {aisle}</div>
+            <div className="wms-rack-row">
+              {racks.map((rack) => {
+                const rackLocations = aisleLocations.filter((location) => (location.rack || 'Sin rack') === rack).sort(compareLocationLayout);
+                return (
+                  <div className="wms-rack" key={`${aisle}-${rack}`}>
+                    <div className="wms-rack-title">Rack {rack}</div>
+                    <div className="wms-slot-grid">
+                      {rackLocations.map((location) => {
+                        const stats = getLocationStats(location);
+                        const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
+                        return (
+                          <button className={`wms-slot ${state}`} key={location.id} onClick={() => onEdit(location)} title={`${location.name} - ${stats.total} unidades`}>
+                            <span>{location.level || 'N'}-{location.position || 'P'}</span>
+                            <strong>{stats.total}</strong>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved }: { catalogs: Catalogs; location?: Location | null; defaultWarehouseId?: string; onClose: () => void; onSaved: () => void }) {
   const [warehouseId, setWarehouseId] = useState(location?.warehouseId ?? defaultWarehouseId ?? catalogs.warehouses[0]?.id ?? '');
   const [code, setCode] = useState(location?.code ?? '');
   const [name, setName] = useState(location?.name ?? '');
+  const [zone, setZone] = useState(location?.zone ?? '');
+  const [aisle, setAisle] = useState(location?.aisle ?? '');
+  const [rack, setRack] = useState(location?.rack ?? '');
+  const [level, setLevel] = useState(location?.level ?? '');
+  const [position, setPosition] = useState(location?.position ?? '');
+  const [kind, setKind] = useState(location?.kind ?? 'STORAGE');
+  const generatedCode = locationLayoutCode({ zone, aisle, rack, level, position, code });
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await wmsApi.saveLocation({ warehouseId, code, name }, location?.id);
+      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, kind }, location?.id);
       toast.success(location ? 'Ubicacion actualizada' : 'Ubicacion creada');
       onSaved();
     } catch (error) {
@@ -1359,9 +1441,44 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
           Codigo
           <input className="wms-input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="PAS-A1" required />
         </label>
+        <div className="col-span-full rounded-lg border border-orange-100 bg-orange-50 p-3 text-sm text-orange-950">
+          Codigo sugerido: <strong>{generatedCode || 'Complete la estructura'}</strong>
+          <button type="button" className="wms-button ml-3 min-h-0 py-1 text-xs" onClick={() => setCode(generatedCode)} disabled={!generatedCode}>
+            Usar codigo
+          </button>
+        </div>
         <label className="wms-label col-span-full">
           Nombre
           <input className="wms-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Pasillo A - Rack 1" required />
+        </label>
+        <label className="wms-label">
+          Tipo
+          <select className="wms-select" value={kind} onChange={(event) => setKind(event.target.value)}>
+            <option value="STORAGE">Almacenamiento</option>
+            <option value="RECEIVING">Recepcion</option>
+            <option value="DISPATCH">Despacho</option>
+            <option value="BLOCKED">Bloqueados</option>
+          </select>
+        </label>
+        <label className="wms-label">
+          Zona
+          <input className="wms-input" value={zone} onChange={(event) => setZone(event.target.value)} placeholder="A" />
+        </label>
+        <label className="wms-label">
+          Pasillo
+          <input className="wms-input" value={aisle} onChange={(event) => setAisle(event.target.value)} placeholder="01" />
+        </label>
+        <label className="wms-label">
+          Rack
+          <input className="wms-input" value={rack} onChange={(event) => setRack(event.target.value)} placeholder="03" />
+        </label>
+        <label className="wms-label">
+          Nivel
+          <input className="wms-input" value={level} onChange={(event) => setLevel(event.target.value)} placeholder="02" />
+        </label>
+        <label className="wms-label">
+          Posicion
+          <input className="wms-input" value={position} onChange={(event) => setPosition(event.target.value)} placeholder="08" />
         </label>
         <div className="col-span-full flex justify-end gap-2">
           <button type="button" className="wms-button" onClick={onClose}>Cancelar</button>
@@ -1409,39 +1526,100 @@ function WarehousesPage() {
         }
       />
       <div className="wms-grid cols-2">
-        {warehouses.map((warehouse) => (
-          <section className="wms-card" key={warehouse.id}>
-            <div className="wms-card-header">
-              <div>
-                <h3 className="text-lg font-extrabold">{warehouse.name}</h3>
-                <p className="text-sm text-slate-500">{warehouse.code}</p>
+        {warehouses.map((warehouse) => {
+          const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
+          const occupied = warehouseLocations.filter((location) => getLocationStats(location).total > 0).length;
+          const available = warehouseLocations.length - occupied;
+          const zones = new Set(warehouseLocations.map((location) => location.zone).filter(Boolean)).size;
+          return (
+            <section className="wms-card wms-warehouse-card" key={warehouse.id}>
+              <div className="wms-card-header">
+                <div>
+                  <h3 className="text-lg font-extrabold">{warehouse.name}</h3>
+                  <p className="text-sm text-slate-500">{warehouse.code}</p>
+                </div>
+                <div className="wms-actions">
+                  <button className="wms-button" onClick={() => setEditingWarehouse(warehouse)}>Editar</button>
+                  <button className="wms-button danger" onClick={() => removeWarehouse(warehouse)}><Trash2 size={15} /></button>
+                </div>
               </div>
-              <div className="wms-actions">
-                <button className="wms-button" onClick={() => setEditingWarehouse(warehouse)}>Editar</button>
-                <button className="wms-button danger" onClick={() => removeWarehouse(warehouse)}><Trash2 size={15} /></button>
-              </div>
-            </div>
-            <div className="wms-card-body grid gap-2">
-              <button className="wms-button" onClick={() => setEditingLocation({ location: null, warehouseId: warehouse.id })}>
-                Nueva ubicacion
-              </button>
-              {locations
-                .filter((location) => location.warehouseId === warehouse.id)
-                .map((location) => (
-                  <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2" key={location.id}>
-                    <div>
-                      <div className="font-extrabold">{location.name}</div>
-                      <div className="text-xs text-slate-500">{location.code}</div>
-                    </div>
-                    <div className="wms-actions">
-                      <button className="wms-button" onClick={() => setEditingLocation({ location })}>Editar</button>
-                      <button className="wms-button danger" onClick={() => removeLocation(location)}><Trash2 size={15} /></button>
-                    </div>
+              <div className="wms-card-body grid gap-4">
+                <div className="wms-location-summary">
+                  <div><span>Total</span><strong>{warehouseLocations.length}</strong></div>
+                  <div><span>Disponibles</span><strong>{available}</strong></div>
+                  <div><span>Ocupadas</span><strong>{occupied}</strong></div>
+                  <div><span>Zonas</span><strong>{zones}</strong></div>
+                </div>
+                <div className="wms-map-header">
+                  <div>
+                    <h4 className="font-extrabold">Mapa de racks y posiciones</h4>
+                    <p className="text-xs text-slate-500">Clic en una posicion para editar su estructura.</p>
                   </div>
-                ))}
-            </div>
-          </section>
-        ))}
+                  <button className="wms-button" onClick={() => setEditingLocation({ location: null, warehouseId: warehouse.id })}>
+                    Nueva ubicacion
+                  </button>
+                </div>
+                <WarehouseLocationMap warehouse={warehouse} locations={locations} onEdit={(location) => setEditingLocation({ location })} />
+                <div className="wms-map-legend">
+                  <span><i className="empty" /> Libre</span>
+                  <span><i className="filled" /> Con stock</span>
+                  <span><i className="reserved" /> Con reserva</span>
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-extrabold text-slate-700">Listado de ubicaciones disponibles</div>
+                  <div className="wms-table-wrap">
+                    <table className="wms-table compact">
+                      <thead>
+                        <tr>
+                          <th>Ubicacion</th>
+                          <th>Tipo</th>
+                          <th>Zona</th>
+                          <th>Pasillo</th>
+                          <th>Rack</th>
+                          <th>Nivel</th>
+                          <th>Posicion</th>
+                          <th>Stock</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {warehouseLocations.map((location) => {
+                          const stats = getLocationStats(location);
+                          return (
+                            <tr key={location.id}>
+                              <td>
+                                <div className="font-extrabold">{location.name}</div>
+                                <div className="text-xs text-slate-500">{location.code}</div>
+                              </td>
+                              <td>{locationKindLabels[location.kind ?? 'STORAGE'] ?? location.kind}</td>
+                              <td>{location.zone || '-'}</td>
+                              <td>{location.aisle || '-'}</td>
+                              <td>{location.rack || '-'}</td>
+                              <td>{location.level || '-'}</td>
+                              <td>{location.position || '-'}</td>
+                              <td>{stats.total ? `${stats.total} unid.` : <span className="text-emerald-700 font-bold">Libre</span>}</td>
+                              <td>
+                                <div className="wms-actions">
+                                  <button className="wms-button" onClick={() => setEditingLocation({ location })}>Editar</button>
+                                  <button className="wms-button danger" onClick={() => removeLocation(location)}><Trash2 size={15} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {!warehouseLocations.length ? (
+                          <tr>
+                            <td colSpan={9} className="text-center text-slate-500">Sin ubicaciones en esta bodega.</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </section>
+          );
+        })}
       </div>
       {editingWarehouse !== undefined ? (
         <WarehouseForm

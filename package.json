@@ -16,6 +16,7 @@
     "db:seed:ferremayor": "tsx prisma/seed-ferremayor.ts",
     "db:import:ferremayor": "tsx prisma/import-ferremayor-catalog.ts",
     "api:import:ferremayor": "tsx scripts/import-ferremayor-api.ts",
+    "api:layout:demo": "tsx scripts/generate-location-layout-api.ts",
     "db:empty": "tsx prisma/empty-demo.ts",
     "db:reset": "prisma migrate reset --force",
     "deploy:vercel": "vercel --prod",

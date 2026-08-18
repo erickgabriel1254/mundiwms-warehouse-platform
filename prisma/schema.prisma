@@ -116,6 +116,12 @@ model Location {
   id                 String              @id @default(cuid())
   name               String
   code               String
+  zone               String              @default("")
+  aisle              String              @default("")
+  rack               String              @default("")
+  level              String              @default("")
+  position           String              @default("")
+  kind               String              @default("STORAGE")
   warehouseId        String
   warehouse          Warehouse           @relation(fields: [warehouseId], references: [id])
   inventoryUnits     InventoryUnit[]

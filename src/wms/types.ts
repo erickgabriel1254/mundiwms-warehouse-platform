@@ -70,7 +70,20 @@ export type ProductCategory = {
 };
 
 export type Warehouse = { id: string; code: string; name: string; companyId?: string; company?: Company };
-export type Location = { id: string; code: string; name: string; warehouseId: string; warehouse?: Warehouse };
+export type Location = {
+  id: string;
+  code: string;
+  name: string;
+  zone?: string;
+  aisle?: string;
+  rack?: string;
+  level?: string;
+  position?: string;
+  kind?: 'STORAGE' | 'RECEIVING' | 'DISPATCH' | 'BLOCKED' | string;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  inventoryBalances?: { status: UnitStatus; quantity: number; product?: Product }[];
+};
 export type ProductLocationDefault = { id: string; productId: string; warehouseId: string; locationId: string; warehouse: Warehouse; location: Location };
 
 export type InventoryUnit = {

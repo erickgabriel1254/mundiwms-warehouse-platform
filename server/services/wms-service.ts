@@ -49,6 +49,12 @@ const locationSchema = z.object({
   warehouseId: z.string().min(1),
   code: z.string().trim().min(2).max(20),
   name: z.string().trim().min(3).max(80),
+  zone: z.string().trim().max(24).optional().default(''),
+  aisle: z.string().trim().max(24).optional().default(''),
+  rack: z.string().trim().max(24).optional().default(''),
+  level: z.string().trim().max(24).optional().default(''),
+  position: z.string().trim().max(24).optional().default(''),
+  kind: z.enum(['STORAGE', 'RECEIVING', 'DISPATCH', 'BLOCKED']).default('STORAGE'),
 });
 
 const warehouseSchema = z.object({
@@ -228,7 +234,11 @@ export async function getCatalogs(companyId: string) {
     prisma.supplier.findMany({ where: { companyId }, orderBy: { name: 'asc' } }),
     prisma.client.findMany({ where: { companyId }, orderBy: { name: 'asc' } }),
     prisma.warehouse.findMany({ where: { companyId }, orderBy: { name: 'asc' }, include: { company: true } }),
-    prisma.location.findMany({ where: { warehouse: { companyId } }, orderBy: { name: 'asc' }, include: { warehouse: true } }),
+    prisma.location.findMany({
+      where: { warehouse: { companyId } },
+      orderBy: [{ warehouse: { name: 'asc' } }, { zone: 'asc' }, { aisle: 'asc' }, { rack: 'asc' }, { level: 'asc' }, { position: 'asc' }, { name: 'asc' }],
+      include: { warehouse: true, inventoryBalances: { include: { product: true } } },
+    }),
   ]);
   return { companies, categories, products, suppliers, clients, warehouses, locations };
 }
