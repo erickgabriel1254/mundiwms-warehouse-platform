@@ -754,7 +754,7 @@ export async function confirmInbound(id: string, userId: string, companyId: stri
     await tx.inboundOrder.update({ where: { id }, data: { status: 'RECEIVED', confirmedAt: new Date() } });
     await rebuildBalances(tx);
     return { ok: true };
-  });
+  }, { timeout: 30000 });
 }
 
 export async function cancelInbound(id: string, companyId: string) {
