@@ -16,7 +16,7 @@ export function clearToken() {
 }
 
 export function getCompanyId() {
-  return localStorage.getItem(COMPANY_KEY) || 'company_mundimaquinas';
+  return localStorage.getItem(COMPANY_KEY) || 'company_ferremayor';
 }
 
 export function setCompanyId(companyId: string) {

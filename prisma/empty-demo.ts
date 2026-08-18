@@ -85,10 +85,10 @@ async function main() {
 
   await Promise.all([
     prisma.company.create({
-      data: { id: 'company_mundimaquinas', code: 'MUNDIMAQUINAS', name: 'Mundimaquinas', theme: 'orange', primaryColor: '#ea580c' },
+      data: { id: 'company_ferremayor', code: 'FERREMAYOR', name: 'Corporacion Lopez Villagomez - Ferremayor', theme: 'orange', primaryColor: '#f97316' },
     }),
     prisma.company.create({
-      data: { id: 'company_sirumaz', code: 'SIRUMAZ', name: 'Sirumaz', theme: 'blue', primaryColor: '#2563eb' },
+      data: { id: 'company_ferrilopez', code: 'FERRILOPEZ', name: 'FerriLopez', theme: 'blue', primaryColor: '#2563eb' },
     }),
   ]);
 

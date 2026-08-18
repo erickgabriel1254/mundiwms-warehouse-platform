@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:ferremayor": "tsx prisma/seed-ferremayor.ts",
     "db:empty": "tsx prisma/empty-demo.ts",
     "db:reset": "prisma migrate reset --force",
     "deploy:vercel": "vercel --prod",

@@ -60,6 +60,9 @@ model Product {
   name               String
   category           String
   brand              String
+  description        String              @default("")
+  includes           String[]            @default([])
+  sourceUrl          String?
   unit               String              @default("Unidad")
   purchasePrice      Decimal             @default(0) @db.Decimal(12, 2)
   salePrice          Decimal             @default(0) @db.Decimal(12, 2)

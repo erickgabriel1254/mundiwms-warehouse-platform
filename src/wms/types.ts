@@ -44,6 +44,9 @@ export type Product = {
   name: string;
   category: string;
   brand: string;
+  description: string;
+  includes: string[];
+  sourceUrl?: string | null;
   unit: string;
   purchasePrice: number | string;
   salePrice: number | string;

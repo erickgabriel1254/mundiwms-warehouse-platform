@@ -226,10 +226,10 @@ function AppShell() {
       <div className={`wms-layout ${collapsed ? 'sidebar-collapsed' : ''}`}>
         <aside className={`wms-sidebar ${open ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
           <div className="wms-brand">
-            <span className="wms-logo">MW</span>
+            <span className="wms-logo">CLV</span>
             <div className="wms-brand-text">
-              <div>MundiWMS</div>
-              <div className="text-xs font-semibold text-slate-500">Gestion de bodega</div>
+              <div>CLV WMS</div>
+              <div className="text-xs font-semibold text-slate-500">Gestion ferretera</div>
             </div>
             <button className="wms-button wms-sidebar-collapse" onClick={() => setCollapsed((value) => !value)} aria-label="Guardar menu lateral">
               {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
@@ -267,7 +267,7 @@ function AppShell() {
               </button>
               <div>
                 <h1 className="text-lg font-extrabold">WMS</h1>
-                <p className="text-sm text-slate-500">Maquinaria, repuestos, accesorios e insumos</p>
+                <p className="text-sm text-slate-500">Ferreteria, bodega y distribucion</p>
               </div>
             </div>
             <div className="wms-header-actions flex items-center gap-3">
@@ -353,10 +353,10 @@ function LoginPage() {
       <form className="wms-card w-full max-w-md" onSubmit={submit}>
         <div className="wms-card-body grid gap-5">
           <div className="flex items-center gap-3">
-            <span className="wms-logo">MW</span>
+            <span className="wms-logo">CLV</span>
             <div>
-              <h1 className="text-2xl font-extrabold">MundiWMS</h1>
-              <p className="text-sm text-slate-500">Operacion integral de bodega</p>
+              <h1 className="text-2xl font-extrabold">CLV WMS</h1>
+              <p className="text-sm text-slate-500">Operacion integral de ferreteria</p>
             </div>
           </div>
           <label className="wms-label">
@@ -561,6 +561,9 @@ const productSchema = z.object({
   name: z.string().min(3),
   category: z.string().min(2),
   brand: z.string().min(2),
+  description: z.string().optional(),
+  includesText: z.string().optional(),
+  sourceUrl: z.union([z.string().url(), z.literal('')]).optional(),
   unit: z.string().min(1),
   purchasePrice: z.coerce.number().min(0),
   salePrice: z.coerce.number().min(0),
@@ -611,7 +614,7 @@ function ProductsPage() {
       />
       <div className="wms-card">
         <div className="wms-card-header">
-          <ClearableInput className="max-w-md" placeholder="Buscar por SKU, nombre, categoria o marca" value={search} onChange={setSearch} />
+          <ClearableInput className="max-w-md" placeholder="Buscar por SKU, codigo de barra, nombre, categoria, marca o descripcion" value={search} onChange={setSearch} />
         </div>
         {loading ? <div className="wms-card-body">Cargando...</div> : null}
         <div className="wms-table-wrap">
@@ -673,6 +676,9 @@ function ProductsPage() {
                               <div><strong>Codigo de barra:</strong> {product.barcode || '-'}</div>
                               <div><strong>Codigos alternos:</strong> {product.barcodes?.length ? product.barcodes.join(', ') : '-'}</div>
                               <div><strong>Precio compra:</strong> ${Number(product.purchasePrice ?? 0).toFixed(2)}</div>
+                              <div><strong>Descripcion:</strong> {product.description || '-'}</div>
+                              <div><strong>Incluye:</strong> {product.includes?.length ? product.includes.join(', ') : '-'}</div>
+                              <div><strong>Fuente:</strong> {product.sourceUrl ? <a className="text-orange-600 underline" href={product.sourceUrl} target="_blank" rel="noreferrer">Ver catalogo</a> : '-'}</div>
                             </div>
                             <div className="text-sm font-extrabold text-slate-700">Ubicaciones por bodega</div>
                             <table className="wms-inner-table">
@@ -889,11 +895,14 @@ function ProductForm({ product, catalogs, onClose, onSaved }: { product: Product
           ...product,
           barcode: product.barcode ?? '',
           barcodesText: product.barcodes?.filter((barcode) => barcode !== product.barcode).join('\n') ?? '',
+          description: product.description ?? '',
+          includesText: product.includes?.join('\n') ?? '',
+          sourceUrl: product.sourceUrl ?? '',
           purchasePrice: Number(product.purchasePrice ?? 0),
           salePrice: Number(product.salePrice ?? 0),
           locationDefaults: product.locationDefaults?.map((entry) => ({ warehouseId: entry.warehouseId, locationId: entry.locationId })) ?? [],
         }
-      : { sku: '', barcode: '', barcodesText: '', name: '', category: categoryOptions[0] ?? '', brand: '', unit: 'Unidad', purchasePrice: 0, salePrice: 0, stockMin: 1, managesSerial: false, status: 'ACTIVE', locationDefaults: [] },
+      : { sku: '', barcode: '', barcodesText: '', name: '', category: categoryOptions[0] ?? '', brand: '', description: '', includesText: '', sourceUrl: '', unit: 'Unidad', purchasePrice: 0, salePrice: 0, stockMin: 1, managesSerial: false, status: 'ACTIVE', locationDefaults: [] },
   });
   const submit = form.handleSubmit(async (values) => {
     try {
@@ -901,8 +910,12 @@ function ProductForm({ product, catalogs, onClose, onSaved }: { product: Product
         ?.split(/[\n,]+/)
         .map((barcode) => barcode.trim())
         .filter(Boolean) ?? [];
-      const { barcodesText, ...payload } = values;
-      await wmsApi.saveProduct({ ...payload, barcodes, locationDefaults: locationDefaults.filter((entry) => entry.locationId) }, product?.id);
+      const includes = values.includesText
+        ?.split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean) ?? [];
+      const { barcodesText, includesText, ...payload } = values;
+      await wmsApi.saveProduct({ ...payload, barcodes, includes, locationDefaults: locationDefaults.filter((entry) => entry.locationId) }, product?.id);
       toast.success('Producto guardado');
       onSaved();
       onClose();
@@ -941,6 +954,18 @@ function ProductForm({ product, catalogs, onClose, onSaved }: { product: Product
         <label className="wms-label">
           Unidad
           <input className="wms-input" {...form.register('unit')} />
+        </label>
+        <label className="wms-label col-span-full">
+          Descripcion
+          <textarea className="wms-textarea" {...form.register('description')} placeholder="Descripcion comercial del producto" />
+        </label>
+        <label className="wms-label col-span-full">
+          Incluye
+          <textarea className="wms-textarea" {...form.register('includesText')} placeholder="Uno por linea o separados por coma" />
+        </label>
+        <label className="wms-label col-span-full">
+          URL fuente / catalogo
+          <input className="wms-input" {...form.register('sourceUrl')} placeholder="Opcional" />
         </label>
         <label className="wms-label">
           Precio compra
@@ -1215,7 +1240,7 @@ function filterInventoryRows(rows: InventoryProductRow[], search: string) {
   const term = search.trim().toLowerCase();
   if (!term) return rows;
   return rows.filter((row) => {
-    const productText = `${row.product.sku} ${row.product.barcode ?? ''} ${(row.product.barcodes ?? []).join(' ')} ${row.product.name} ${row.product.category} ${row.product.brand}`.toLowerCase();
+    const productText = `${row.product.sku} ${row.product.barcode ?? ''} ${(row.product.barcodes ?? []).join(' ')} ${row.product.name} ${row.product.category} ${row.product.brand} ${row.product.description ?? ''}`.toLowerCase();
     const locationText = `${row.warehouses.join(' ')} ${row.locations.join(' ')}`.toLowerCase();
     const seriesText = row.series.map((unit) => `${unit.serialNumber} ${unit.warehouse.name} ${unit.location.name}`).join(' ').toLowerCase();
     return productText.includes(term) || locationText.includes(term) || seriesText.includes(term);

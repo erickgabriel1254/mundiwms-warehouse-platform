@@ -10,6 +10,9 @@ const productSchema = z.object({
   name: z.string().min(3),
   category: z.string().min(2),
   brand: z.string().min(2),
+  description: z.string().trim().default(''),
+  includes: z.array(z.string().trim()).default([]),
+  sourceUrl: z.union([z.string().trim().url(), z.literal('')]).optional(),
   unit: z.string().min(1).default('Unidad'),
   purchasePrice: z.coerce.number().min(0).default(0),
   salePrice: z.coerce.number().min(0).default(0),
@@ -118,7 +121,7 @@ const adjustmentSchema = z.object({
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const DEFAULT_COMPANY_ID = 'company_mundimaquinas';
+const DEFAULT_COMPANY_ID = 'company_ferremayor';
 
 export async function resolveCompanyId(rawCompanyId?: string | string[]) {
   const requested = Array.isArray(rawCompanyId) ? rawCompanyId[0] : rawCompanyId;
@@ -306,6 +309,7 @@ export async function listProducts(search = '', companyId: string) {
             { name: { contains: normalized, mode: 'insensitive' } },
             { category: { contains: normalized, mode: 'insensitive' } },
             { brand: { contains: normalized, mode: 'insensitive' } },
+            { description: { contains: normalized, mode: 'insensitive' } },
           ],
         }
       : undefined,
@@ -381,6 +385,8 @@ export async function saveProduct(body: unknown, id?: string) {
     ...productData,
     barcode: data.barcode?.trim() || null,
     barcodes: Array.from(new Set([data.barcode, ...data.barcodes].map((barcode) => barcode?.trim()).filter(Boolean) as string[])),
+    includes: data.includes.filter(Boolean),
+    sourceUrl: data.sourceUrl?.trim() || null,
     purchasePrice: new Prisma.Decimal(data.purchasePrice),
     salePrice: new Prisma.Decimal(data.salePrice),
   };
@@ -1400,6 +1406,8 @@ export async function getReports(query: URLSearchParams, companyId: string) {
         sku: product.sku,
         producto: product.name,
         categoria: product.category,
+        descripcion: product.description,
+        incluye: product.includes.join(' | '),
         stockMinimo: product.stockMin,
         disponible: product.inventoryBalances.filter((balance) => balance.status === 'AVAILABLE').reduce((sum, balance) => sum + balance.quantity, 0),
       }))

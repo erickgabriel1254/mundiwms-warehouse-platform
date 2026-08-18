@@ -1,0 +1,3 @@
+ALTER TABLE "products" ADD COLUMN "description" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "products" ADD COLUMN "includes" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "products" ADD COLUMN "sourceUrl" TEXT;
