@@ -18,6 +18,7 @@
     "api:import:ferremayor": "tsx scripts/import-ferremayor-api.ts",
     "api:layout:demo": "tsx scripts/generate-location-layout-api.ts",
     "api:stock:demo": "tsx scripts/seed-demo-inventory-api.ts",
+    "api:ops:carvatel": "tsx scripts/seed-carvatel-operations-api.ts",
     "db:empty": "tsx prisma/empty-demo.ts",
     "db:reset": "prisma migrate reset --force",
     "deploy:vercel": "vercel --prod",

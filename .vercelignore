@@ -1,0 +1,6 @@
+.env
+.env.*
+work/
+Presentacion-*.pptx
+Presentacion-*.pptx.inspect.ndjson
+Presentacion-CLV-WMS-Con-Capturas/

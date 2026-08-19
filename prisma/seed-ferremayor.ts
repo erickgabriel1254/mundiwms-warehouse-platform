@@ -110,13 +110,13 @@ const products = [
 async function upsertCompany() {
   const ferremayor = await prisma.company.upsert({
     where: { id: 'company_ferremayor' },
-    update: { code: 'FERREMAYOR', name: 'Corporacion Lopez Villagomez - Ferremayor', theme: 'orange', primaryColor: '#f97316' },
-    create: { id: 'company_ferremayor', code: 'FERREMAYOR', name: 'Corporacion Lopez Villagomez - Ferremayor', theme: 'orange', primaryColor: '#f97316' },
+    update: { code: 'CARVATEL', name: 'Carvatel', theme: 'red', primaryColor: '#dc2626' },
+    create: { id: 'company_ferremayor', code: 'CARVATEL', name: 'Carvatel', theme: 'red', primaryColor: '#dc2626' },
   });
   const ferrilopez = await prisma.company.upsert({
     where: { id: 'company_ferrilopez' },
-    update: { code: 'FERRILOPEZ', name: 'FerriLopez', theme: 'blue', primaryColor: '#2563eb' },
-    create: { id: 'company_ferrilopez', code: 'FERRILOPEZ', name: 'FerriLopez', theme: 'blue', primaryColor: '#2563eb' },
+    update: { code: 'CARVATEL-SUC', name: 'Carvatel Sucursal', theme: 'red', primaryColor: '#dc2626' },
+    create: { id: 'company_ferrilopez', code: 'CARVATEL-SUC', name: 'Carvatel Sucursal', theme: 'red', primaryColor: '#dc2626' },
   });
 
   const warehouses = await Promise.all([

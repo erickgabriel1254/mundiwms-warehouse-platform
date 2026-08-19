@@ -40,8 +40,8 @@ model Company {
   id             String          @id @default(cuid())
   code           String          @unique
   name           String
-  theme          String          @default("orange")
-  primaryColor   String          @default("#ea580c")
+  theme          String          @default("red")
+  primaryColor   String          @default("#dc2626")
   warehouses     Warehouse[]
   clients        Client[]
   suppliers      Supplier[]

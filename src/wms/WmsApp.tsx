@@ -107,6 +107,17 @@ const movementLabels: Record<string, string> = {
   LOCATION_CHANGE: 'Cambio de ubicacion',
 };
 
+function companyDisplayName(company?: Pick<Company, 'id' | 'code' | 'name'> | null) {
+  if (!company) return '';
+  if (['company_ferremayor', 'company_mundimaquinas'].includes(company.id) || ['FERREMAYOR', 'MUNDIMAQUINAS', 'CARVATEL', 'CARVATEL-MATRIZ'].includes(company.code)) {
+    return 'Carvatel';
+  }
+  if (['company_ferrilopez', 'company_sirumaz'].includes(company.id) || ['FERRILOPEZ', 'SIRUMAZ', 'CARVATEL-SUC', 'CARVATEL-TIENDA'].includes(company.code)) {
+    return 'Carvatel Sucursal';
+  }
+  return company.name;
+}
+
 type AuthState = {
   user: UserSession | null;
   loading: boolean;
@@ -182,7 +193,7 @@ function ScreenState({ title, detail }: { title: string; detail?: string }) {
   return (
     <div className="wms-shell grid min-h-screen place-items-center p-6">
       <div className="wms-card max-w-md p-6 text-center">
-        <div className="mx-auto mb-4 h-10 w-10 animate-pulse rounded-lg bg-orange-500" />
+        <div className="mx-auto mb-4 h-10 w-10 animate-pulse rounded-lg bg-red-600" />
         <h1 className="text-xl font-bold">{title}</h1>
         {detail ? <p className="mt-2 text-sm text-slate-500">{detail}</p> : null}
       </div>
@@ -227,13 +238,13 @@ function AppShell() {
   ] as const;
 
   return (
-    <div className={`wms-shell theme-${selectedCompany?.theme ?? 'orange'}`}>
+    <div className={`wms-shell theme-${selectedCompany?.theme ?? 'red'}`}>
       <div className={`wms-layout ${collapsed ? 'sidebar-collapsed' : ''}`}>
         <aside className={`wms-sidebar ${open ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
           <div className="wms-brand">
-            <span className="wms-logo">CLV</span>
+            <span className="wms-logo">CTV</span>
             <div className="wms-brand-text">
-              <div>CLV WMS</div>
+              <div>Carvatel WMS</div>
               <div className="text-xs font-semibold text-slate-500">Gestion ferretera</div>
             </div>
             <button className="wms-button wms-sidebar-collapse" onClick={() => setCollapsed((value) => !value)} aria-label="Guardar menu lateral">
@@ -288,7 +299,7 @@ function AppShell() {
                   >
                     {companies.data.map((company) => (
                       <option key={company.id} value={company.id}>
-                        {company.name}
+                        {companyDisplayName(company)}
                       </option>
                     ))}
                   </select>
@@ -359,9 +370,9 @@ function LoginPage() {
       <form className="wms-card w-full max-w-md" onSubmit={submit}>
         <div className="wms-card-body grid gap-5">
           <div className="flex items-center gap-3">
-            <span className="wms-logo">CLV</span>
+            <span className="wms-logo">CTV</span>
             <div>
-              <h1 className="text-2xl font-extrabold">CLV WMS</h1>
+              <h1 className="text-2xl font-extrabold">Carvatel WMS</h1>
               <p className="text-sm text-slate-500">Operacion integral de ferreteria</p>
             </div>
           </div>
@@ -510,7 +521,7 @@ function DashboardPage() {
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis dataKey="sku" type="category" width={92} />
                 <Tooltip />
-                <Bar dataKey="movements" name="Movimientos" fill="#ea580c" radius={[0, 6, 6, 0]} />
+                <Bar dataKey="movements" name="Movimientos" fill="#dc2626" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -684,7 +695,7 @@ function ProductsPage() {
                               <div><strong>Precio compra:</strong> ${Number(product.purchasePrice ?? 0).toFixed(2)}</div>
                               <div><strong>Descripcion:</strong> {product.description || '-'}</div>
                               <div><strong>Incluye:</strong> {product.includes?.length ? product.includes.join(', ') : '-'}</div>
-                              <div><strong>Fuente:</strong> {product.sourceUrl ? <a className="text-orange-600 underline" href={product.sourceUrl} target="_blank" rel="noreferrer">Ver catalogo</a> : '-'}</div>
+                              <div><strong>Fuente:</strong> {product.sourceUrl ? <a className="text-red-600 underline" href={product.sourceUrl} target="_blank" rel="noreferrer">Ver catalogo</a> : '-'}</div>
                             </div>
                             <div className="text-sm font-extrabold text-slate-700">Ubicaciones por bodega</div>
                             <table className="wms-inner-table">
@@ -1790,7 +1801,7 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
           Codigo
           <input className="wms-input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="PAS-A1" required />
         </label>
-        <div className="col-span-full rounded-lg border border-orange-100 bg-orange-50 p-3 text-sm text-orange-950">
+        <div className="col-span-full rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-950">
           Codigo sugerido: <strong>{generatedCode || 'Complete la estructura'}</strong>
           <button type="button" className="wms-button ml-3 min-h-0 py-1 text-xs" onClick={() => setCode(generatedCode)} disabled={!generatedCode}>
             Usar codigo
@@ -2278,7 +2289,7 @@ function OrderReview({
   const warehouse = catalogs.warehouses.find((item) => item.id === payload.warehouseId);
   return (
     <div className="wms-grid">
-      <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
+      <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
         <div className="font-extrabold">{mode === 'inbound' ? 'Confirmar recepcion' : 'Confirmar despacho'}</div>
         <div>Numero de orden: {estimatedOrderNo}</div>
         <div>{mode === 'inbound' ? 'Proveedor' : 'Cliente'}: {party?.name ?? '-'}</div>
@@ -2338,7 +2349,7 @@ function ShipmentReview({
   return (
     <Modal title={`Enviar despacho ${order.orderNo}`} onClose={onClose}>
       <div className="wms-grid">
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
           <div className="font-extrabold">Cliente: {order.client.name}</div>
           <div>Bodega: {order.warehouse.name}</div>
           <div>Orden de compra: {order.purchaseOrder || '-'}</div>
@@ -2659,9 +2670,9 @@ function OrderForm({
   return (
     <form className="wms-grid" onSubmit={submit}>
       <div className="wms-grid cols-2">
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
-          <div className="text-xs font-bold uppercase text-orange-800">Numero de orden</div>
-          <div className="text-lg font-extrabold text-orange-950">{estimatedOrderNo}</div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+          <div className="text-xs font-bold uppercase text-red-800">Numero de orden</div>
+          <div className="text-lg font-extrabold text-red-950">{estimatedOrderNo}</div>
         </div>
         <ContactPicker label={mode === 'inbound' ? 'Proveedor' : 'Cliente'} contacts={mode === 'inbound' ? catalogs.suppliers : catalogs.clients} value={partyId} onChange={setPartyId} />
         <label className="wms-label">

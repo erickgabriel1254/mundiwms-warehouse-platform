@@ -66,7 +66,7 @@ const productDemoData: Record<string, ProductDemoData> = {
 };
 
 function qtyForCompany(company: Company, data: ProductDemoData) {
-  return company.code === 'FERRILOPEZ' ? data.qtyFerriLopez : data.qtyFerremayor;
+  return ['FERRILOPEZ', 'CARVATEL-SUC', 'CARVATEL-TIENDA'].includes(company.code) ? data.qtyFerriLopez : data.qtyFerremayor;
 }
 
 async function api<T>(path: string, token: string, companyId: string, options: RequestInit = {}) {
@@ -133,17 +133,18 @@ async function updateProducts(token: string, companyId: string, catalogsByCompan
 }
 
 async function ensureSupplier(token: string, company: Company, catalogs: Catalogs) {
-  const taxId = company.code === 'FERRILOPEZ' ? '1799000002001' : '1799000001001';
+  const isBranch = ['FERRILOPEZ', 'CARVATEL-SUC', 'CARVATEL-TIENDA'].includes(company.code);
+  const taxId = isBranch ? '1799000002001' : '1799000001001';
   const existing = catalogs.suppliers.find((supplier) => supplier.taxId === taxId);
   if (existing) return existing;
   return api<Supplier>('/suppliers', token, company.id, {
     method: 'POST',
     body: JSON.stringify({
-      name: company.code === 'FERRILOPEZ' ? 'Distribuidora FerriLopez Demo' : 'Distribuidora Andina de Herramientas',
+      name: isBranch ? 'Proveedor Demo Carvatel Sucursal' : 'Proveedor Demo Carvatel',
       taxId,
       contact: 'Compras Demo',
       phone: '0999999999',
-      email: company.code === 'FERRILOPEZ' ? 'proveedor.ferrilopez@demo.local' : 'proveedor.ferremayor@demo.local',
+      email: isBranch ? 'proveedor.sucursal@carvatel.demo' : 'proveedor@carvatel.demo',
       address: 'Santo Domingo, Ecuador',
       status: 'ACTIVE',
     }),
@@ -195,7 +196,7 @@ async function createInitialInbound(token: string, company: Company) {
       locationId: receivingLocation.id,
       status: 'PENDING',
       purchaseOrder,
-      carrierName: 'Transporte Demo CLV',
+      carrierName: 'Transporte Demo Carvatel',
       guideNumber: `GUIA-${company.code}-001`,
       notes: 'Stock inicial de demostracion para pruebas comerciales',
       items,
@@ -208,7 +209,7 @@ async function createInitialInbound(token: string, company: Company) {
 async function main() {
   const token = await login();
   const companies = await api<Company[]>('/companies', token, 'company_ferremayor');
-  const targetCompanies = companies.filter((company) => ['FERREMAYOR', 'FERRILOPEZ'].includes(company.code));
+  const targetCompanies = companies.filter((company) => ['FERREMAYOR', 'FERRILOPEZ', 'CARVATEL', 'CARVATEL-SUC', 'CARVATEL-MATRIZ', 'CARVATEL-TIENDA'].includes(company.code));
   const catalogsByCompany = await Promise.all(targetCompanies.map((company) => api<Catalogs>('/catalogs', token, company.id)));
   const productUpdates = await updateProducts(token, targetCompanies[0]?.id ?? 'company_ferremayor', catalogsByCompany);
 

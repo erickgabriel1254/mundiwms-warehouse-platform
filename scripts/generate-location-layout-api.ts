@@ -116,7 +116,7 @@ async function main() {
   const companies = await rawApi<Company[]>('/companies', token, 'company_ferremayor');
   let total = 0;
   for (const company of companies) {
-    const config: LayoutConfig = company.code === 'FERRILOPEZ'
+    const config: LayoutConfig = ['FERRILOPEZ', 'CARVATEL-SUC', 'CARVATEL-TIENDA'].includes(company.code)
       ? { zone: 'B', aisles: 1, racks: 2, levels: 2, positions: 3 }
       : { zone: 'A', aisles: 2, racks: 3, levels: 3, positions: 4 };
     total += await createLayout(token, company, config);

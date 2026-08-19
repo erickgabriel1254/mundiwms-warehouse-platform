@@ -105,10 +105,10 @@ async function main() {
   ]);
 
   const mundimaquinas = await prisma.company.create({
-    data: { id: 'company_mundimaquinas', code: 'MUNDIMAQUINAS', name: 'Mundimaquinas', theme: 'orange', primaryColor: '#ea580c' },
+    data: { id: 'company_mundimaquinas', code: 'CARVATEL', name: 'Carvatel', theme: 'red', primaryColor: '#dc2626' },
   });
   const sirumaz = await prisma.company.create({
-    data: { id: 'company_sirumaz', code: 'SIRUMAZ', name: 'Sirumaz', theme: 'blue', primaryColor: '#2563eb' },
+    data: { id: 'company_sirumaz', code: 'CARVATEL-SUC', name: 'Carvatel Sucursal', theme: 'red', primaryColor: '#dc2626' },
   });
 
   const central = await prisma.warehouse.create({

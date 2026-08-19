@@ -32,7 +32,7 @@ export type Company = {
   id: string;
   code: string;
   name: string;
-  theme: 'orange' | 'blue' | string;
+  theme: 'red' | 'orange' | 'blue' | string;
   primaryColor: string;
 };
 
