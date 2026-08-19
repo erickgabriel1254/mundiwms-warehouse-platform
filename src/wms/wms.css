@@ -924,7 +924,6 @@
 
   .wms-content {
     max-width: 100vw;
-    overflow-x: clip;
     padding: 10px 8px;
   }
 
@@ -1037,7 +1036,7 @@
   .wms-warehouse-card {
     width: 100%;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .wms-warehouse-card .wms-card-header {
@@ -1085,8 +1084,15 @@
   }
 
   .wms-location-map {
+    width: 100%;
     gap: 10px;
+    overflow-x: auto;
     padding: 10px;
+    touch-action: pan-x pan-y;
+  }
+
+  .wms-rack-row {
+    width: max-content;
   }
 
   .wms-rack {
@@ -1176,7 +1182,6 @@
 
   .wms-content {
     max-width: 100vw;
-    overflow-x: clip;
     padding: 8px 6px;
   }
 

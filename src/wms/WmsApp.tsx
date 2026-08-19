@@ -212,6 +212,7 @@ function AppShell() {
     ['/categorias', 'Categorias', Tags],
     ['/inventario', 'Inventario', Boxes],
     ['/bodegas', 'Bodegas', Warehouse],
+    ['/conteo-ciclico', 'Conteo ciclico', ClipboardList],
     ['/pedidos', 'Generar pedido', ClipboardList],
     ['/recepcion', 'Recepcion', PackagePlus],
     ['/despacho', 'Despacho', Truck],
@@ -310,6 +311,7 @@ function AppShell() {
               <Route path="/categorias" element={<CategoriesPage />} />
               <Route path="/inventario" element={<InventoryPage />} />
               <Route path="/bodegas" element={<WarehousesPage />} />
+              <Route path="/conteo-ciclico" element={<CycleCountPage />} />
               <Route path="/pedidos" element={<ImportOrdersPage />} />
               <Route path="/recepcion" element={<InboundPage />} />
               <Route path="/despacho" element={<OutboundPage />} />
@@ -1296,6 +1298,224 @@ function MoveUnitModal({ unit, catalogs, onClose, onSaved }: { unit: InventoryUn
         </div>
       </form>
     </Modal>
+  );
+}
+
+type CycleCountItem = {
+  key: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  warehouse: string;
+  location: string;
+  expected: number;
+  counted: string;
+};
+
+type CycleCountState = {
+  id: string;
+  companyId: string;
+  round: number;
+  createdAt: string;
+  items: CycleCountItem[];
+};
+
+function cycleCountKey() {
+  return `wms-cycle-count-${getCompanyId()}`;
+}
+
+function shuffleCycleItems(items: CycleCountItem[]) {
+  return [...items]
+    .map((item) => ({ item, sort: Math.random() }))
+    .sort((a, b) => a.sort - b.sort)
+    .map(({ item }) => item);
+}
+
+function buildCycleCandidates(balances: InventoryBalance[]): CycleCountItem[] {
+  return balances
+    .filter((balance) => balance.status === 'AVAILABLE' && balance.quantity > 0)
+    .map((balance) => ({
+      key: `${balance.productId}-${balance.warehouseId}-${balance.locationId}`,
+      productId: balance.productId,
+      sku: balance.product.sku,
+      productName: balance.product.name,
+      warehouse: balance.warehouse.name,
+      location: balance.location.name,
+      expected: balance.quantity,
+      counted: '',
+    }));
+}
+
+function CycleCountPage() {
+  const inventory = useLoad(() => wmsApi.inventory('?status=AVAILABLE'), []);
+  const [sampleSize, setSampleSize] = useState(8);
+  const [cycle, setCycle] = useState<CycleCountState | null>(() => {
+    const raw = localStorage.getItem(cycleCountKey());
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as CycleCountState;
+    } catch {
+      return null;
+    }
+  });
+  const candidates = buildCycleCandidates(inventory.data?.balances ?? []);
+  const missingMode = Boolean(cycle && cycle.round > 1);
+  const countedLines = cycle?.items.filter((item) => item.counted !== '').length ?? 0;
+  const pendingLines = (cycle?.items.length ?? 0) - countedLines;
+
+  useEffect(() => {
+    if (cycle) localStorage.setItem(cycleCountKey(), JSON.stringify(cycle));
+    else localStorage.removeItem(cycleCountKey());
+  }, [cycle]);
+
+  const generate = () => {
+    if (!candidates.length) {
+      toast.error('No hay stock disponible para generar conteo');
+      return;
+    }
+    const selected = shuffleCycleItems(candidates).slice(0, Math.max(1, Math.min(sampleSize, candidates.length)));
+    setCycle({
+      id: `CC-${Date.now()}`,
+      companyId: getCompanyId(),
+      round: 1,
+      createdAt: new Date().toISOString(),
+      items: selected,
+    });
+    toast.success('Conteo ciclico generado');
+  };
+
+  const updateCount = (key: string, counted: string) => {
+    setCycle((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.map((item) => (item.key === key ? { ...item, counted } : item)),
+          }
+        : current,
+    );
+  };
+
+  const finishRound = () => {
+    if (!cycle) return;
+    const incomplete = cycle.items.some((item) => item.counted === '');
+    if (incomplete) {
+      toast.error('Complete todas las cantidades contadas antes de cerrar');
+      return;
+    }
+    const missing = cycle.items
+      .map((item) => {
+        const counted = Math.max(0, Number(item.counted || 0));
+        return { ...item, expected: Math.max(0, item.expected - counted), counted: '' };
+      })
+      .filter((item) => item.expected > 0);
+
+    if (missing.length) {
+      setCycle({ ...cycle, round: cycle.round + 1, items: missing });
+      toast.warning('Quedaron faltantes. El siguiente conteo solo incluye ese material.');
+      return;
+    }
+
+    setCycle(null);
+    toast.success('Conteo ciclico completado. Ya puede generar un nuevo ciclo.');
+  };
+
+  return (
+    <>
+      <PageTitle title="Conteo ciclico" subtitle="Genera muestras aleatorias del stock disponible y continua solo con faltantes" />
+      <div className="wms-grid cols-4 mb-5">
+        <div className="wms-card wms-card-body">
+          <div className="text-sm font-bold text-slate-500">Material disponible</div>
+          <div className="mt-2 text-3xl font-extrabold">{candidates.length}</div>
+        </div>
+        <div className="wms-card wms-card-body">
+          <div className="text-sm font-bold text-slate-500">Lineas del conteo</div>
+          <div className="mt-2 text-3xl font-extrabold">{cycle?.items.length ?? 0}</div>
+        </div>
+        <div className="wms-card wms-card-body">
+          <div className="text-sm font-bold text-slate-500">Pendientes</div>
+          <div className="mt-2 text-3xl font-extrabold">{pendingLines}</div>
+        </div>
+        <div className="wms-card wms-card-body">
+          <div className="text-sm font-bold text-slate-500">Ronda</div>
+          <div className="mt-2 text-3xl font-extrabold">{cycle?.round ?? '-'}</div>
+        </div>
+      </div>
+
+      <div className="wms-card mb-5">
+        <div className="wms-card-header">
+          <div>
+            <h3 className="font-extrabold">{cycle ? (missingMode ? 'Conteo de faltantes' : 'Conteo activo') : 'Nuevo conteo'}</h3>
+            <p className="text-sm text-slate-500">
+              {cycle ? 'Registre la cantidad fisica encontrada por linea.' : 'Seleccione cuantas lineas aleatorias desea revisar.'}
+            </p>
+          </div>
+          <div className="wms-actions">
+            {!cycle ? (
+              <>
+                <input className="wms-input max-w-[120px]" type="number" min={1} max={50} value={sampleSize} onChange={(event) => setSampleSize(Number(event.target.value))} />
+                <button className="wms-button primary" onClick={generate} disabled={inventory.loading}>
+                  Generar conteo
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="wms-button primary" onClick={finishRound}>Cerrar ronda</button>
+                <button className="wms-button danger" onClick={() => setCycle(null)}>Reiniciar</button>
+              </>
+            )}
+          </div>
+        </div>
+        {cycle ? (
+          <div className="wms-table-wrap">
+            <table className="wms-table compact">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Producto</th>
+                  <th>Bodega</th>
+                  <th>Ubicacion</th>
+                  <th>Sistema</th>
+                  <th>Contado</th>
+                  <th>Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cycle.items.map((item) => {
+                  const counted = item.counted === '' ? null : Number(item.counted);
+                  const diff = counted === null ? '-' : counted - item.expected;
+                  return (
+                    <tr key={item.key}>
+                      <td className="font-extrabold">{item.sku}</td>
+                      <td>{item.productName}</td>
+                      <td>{item.warehouse}</td>
+                      <td>{item.location}</td>
+                      <td>{item.expected}</td>
+                      <td>
+                        <input
+                          className="wms-input max-w-[120px]"
+                          type="number"
+                          min={0}
+                          value={item.counted}
+                          onChange={(event) => updateCount(item.key, event.target.value)}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td>
+                        <span className={`wms-badge ${diff === '-' ? 'slate' : Number(diff) === 0 ? 'green' : 'red'}`}>{diff}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="wms-card-body text-sm text-slate-500">
+            No hay conteo activo. Genere una muestra aleatoria para iniciar.
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
