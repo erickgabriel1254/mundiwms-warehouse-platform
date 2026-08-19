@@ -56,6 +56,8 @@ async function main() {
     'products:manage',
     'inventory:view',
     'warehouses:manage',
+    'cycle-count:manage',
+    'cycle-count:approve',
     'inbound:manage',
     'outbound:manage',
     'kardex:view',
@@ -67,7 +69,7 @@ async function main() {
     'delete:restricted',
   ];
   const supervisorPermissions = adminPermissions.filter((permission) => !['users:manage', 'roles:manage'].includes(permission));
-  const operatorPermissions = ['dashboard:view', 'inventory:view', 'inbound:manage', 'outbound:manage', 'kardex:view', 'adjustments:manage'];
+  const operatorPermissions = ['dashboard:view', 'inventory:view', 'cycle-count:manage', 'inbound:manage', 'outbound:manage', 'kardex:view', 'adjustments:manage'];
 
   const [adminRole, operatorRole, supervisorRole] = await Promise.all([
     prisma.role.create({ data: { code: 'ADMIN', name: 'Administrador', permissions: adminPermissions } }),

@@ -65,6 +65,8 @@ const rolePermissionOptions = [
   ['products:manage', 'Gestionar productos'],
   ['inventory:view', 'Ver inventario'],
   ['warehouses:manage', 'Gestionar bodegas y ubicaciones'],
+  ['cycle-count:manage', 'Gestionar conteo ciclico'],
+  ['cycle-count:approve', 'Aprobar diferencias de conteo'],
   ['inbound:manage', 'Gestionar recepciones'],
   ['outbound:manage', 'Gestionar despachos'],
   ['kardex:view', 'Ver Kardex'],
@@ -1306,7 +1308,10 @@ type CycleCountItem = {
   productId: string;
   sku: string;
   productName: string;
+  managesSerial: boolean;
+  warehouseId: string;
   warehouse: string;
+  locationId: string;
   location: string;
   expected: number;
   counted: string;
@@ -1315,9 +1320,15 @@ type CycleCountItem = {
 type CycleCountState = {
   id: string;
   companyId: string;
+  status: 'COUNTING' | 'RECOUNT' | 'PENDING_APPROVAL';
   round: number;
   createdAt: string;
   items: CycleCountItem[];
+};
+
+type CycleDifference = CycleCountItem & {
+  countedNumber: number;
+  difference: number;
 };
 
 function cycleCountKey() {
@@ -1339,27 +1350,47 @@ function buildCycleCandidates(balances: InventoryBalance[]): CycleCountItem[] {
       productId: balance.productId,
       sku: balance.product.sku,
       productName: balance.product.name,
+      managesSerial: balance.product.managesSerial,
+      warehouseId: balance.warehouseId,
       warehouse: balance.warehouse.name,
+      locationId: balance.locationId,
       location: balance.location.name,
       expected: balance.quantity,
       counted: '',
     }));
 }
 
+function getCycleDifferences(cycle: CycleCountState | null): CycleDifference[] {
+  if (!cycle) return [];
+  return cycle.items
+    .map((item) => {
+      if (item.counted === '') return null;
+      const countedNumber = Number(item.counted);
+      const difference = countedNumber - item.expected;
+      return difference === 0 ? null : { ...item, countedNumber, difference };
+    })
+    .filter((item): item is CycleDifference => Boolean(item));
+}
+
 function CycleCountPage() {
+  const { user } = useAuth();
   const inventory = useLoad(() => wmsApi.inventory('?status=AVAILABLE'), []);
   const [sampleSize, setSampleSize] = useState(8);
   const [cycle, setCycle] = useState<CycleCountState | null>(() => {
     const raw = localStorage.getItem(cycleCountKey());
     if (!raw) return null;
     try {
-      return JSON.parse(raw) as CycleCountState;
+      const stored = JSON.parse(raw) as CycleCountState;
+      return { ...stored, status: stored.status ?? (stored.round > 1 ? 'RECOUNT' : 'COUNTING') };
     } catch {
       return null;
     }
   });
   const candidates = buildCycleCandidates(inventory.data?.balances ?? []);
-  const missingMode = Boolean(cycle && cycle.round > 1);
+  const differences = getCycleDifferences(cycle);
+  const canApprove = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+  const approvalMode = cycle?.status === 'PENDING_APPROVAL';
+  const recountMode = cycle?.status === 'RECOUNT';
   const countedLines = cycle?.items.filter((item) => item.counted !== '').length ?? 0;
   const pendingLines = (cycle?.items.length ?? 0) - countedLines;
 
@@ -1377,6 +1408,7 @@ function CycleCountPage() {
     setCycle({
       id: `CC-${Date.now()}`,
       companyId: getCompanyId(),
+      status: 'COUNTING',
       round: 1,
       createdAt: new Date().toISOString(),
       items: selected,
@@ -1395,6 +1427,18 @@ function CycleCountPage() {
     );
   };
 
+  const requeueDifferences = (nextRound: number) => {
+    if (!cycle) return;
+    const nextItems = differences.map(({ countedNumber: _countedNumber, difference: _difference, ...item }) => ({ ...item, counted: '' }));
+    if (!nextItems.length) {
+      setCycle(null);
+      toast.success('Conteo ciclico completado. Ya puede generar un nuevo ciclo.');
+      return;
+    }
+    setCycle({ ...cycle, status: 'RECOUNT', round: nextRound, items: nextItems });
+    toast.warning('Se genero reconteo solo para las diferencias.');
+  };
+
   const finishRound = () => {
     if (!cycle) return;
     const incomplete = cycle.items.some((item) => item.counted === '');
@@ -1402,26 +1446,53 @@ function CycleCountPage() {
       toast.error('Complete todas las cantidades contadas antes de cerrar');
       return;
     }
-    const missing = cycle.items
-      .map((item) => {
-        const counted = Math.max(0, Number(item.counted || 0));
-        return { ...item, expected: Math.max(0, item.expected - counted), counted: '' };
-      })
-      .filter((item) => item.expected > 0);
-
-    if (missing.length) {
-      setCycle({ ...cycle, round: cycle.round + 1, items: missing });
-      toast.warning('Quedaron faltantes. El siguiente conteo solo incluye ese material.');
+    if (!differences.length) {
+      setCycle(null);
+      toast.success('Conteo ciclico completado sin diferencias. Ya puede generar un nuevo ciclo.');
+      return;
+    }
+    if (cycle.status === 'COUNTING') {
+      requeueDifferences(cycle.round + 1);
       return;
     }
 
-    setCycle(null);
-    toast.success('Conteo ciclico completado. Ya puede generar un nuevo ciclo.');
+    setCycle({ ...cycle, status: 'PENDING_APPROVAL' });
+    toast.warning('Diferencias pendientes de aprobacion por supervisor o administrador.');
+  };
+
+  const approveDifferences = async () => {
+    if (!cycle || !differences.length) return;
+    if (!canApprove) {
+      toast.error('Solo supervisor o administrador puede aprobar diferencias');
+      return;
+    }
+    const serialSurplus = differences.find((item) => item.managesSerial && item.difference > 0);
+    if (serialSurplus) {
+      toast.error(`El sobrante del SKU ${serialSurplus.sku} maneja serie. Registre ese ajuste manualmente con la serie encontrada.`);
+      return;
+    }
+    try {
+      for (const item of differences) {
+        await wmsApi.saveAdjustment({
+          type: item.difference > 0 ? 'POSITIVE' : 'NEGATIVE',
+          productId: item.productId,
+          quantity: Math.abs(item.difference),
+          warehouseId: item.warehouseId,
+          locationId: item.locationId,
+          reason: `Ajuste aprobado por conteo ciclico ${cycle.id}. Sistema ${item.expected}, fisico ${item.countedNumber}.`,
+        });
+      }
+      toast.success('Diferencias aprobadas y Kardex actualizado');
+      setCycle(null);
+      inventory.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo aprobar el ajuste');
+    }
   };
 
   return (
     <>
-      <PageTitle title="Conteo ciclico" subtitle="Genera muestras aleatorias del stock disponible y continua solo con faltantes" />
+      <PageTitle title="Conteo ciclico" subtitle="Muestras aleatorias, reconteo y aprobacion controlada de diferencias" />
       <div className="wms-grid cols-4 mb-5">
         <div className="wms-card wms-card-body">
           <div className="text-sm font-bold text-slate-500">Material disponible</div>
@@ -1432,19 +1503,72 @@ function CycleCountPage() {
           <div className="mt-2 text-3xl font-extrabold">{cycle?.items.length ?? 0}</div>
         </div>
         <div className="wms-card wms-card-body">
-          <div className="text-sm font-bold text-slate-500">Pendientes</div>
-          <div className="mt-2 text-3xl font-extrabold">{pendingLines}</div>
+          <div className="text-sm font-bold text-slate-500">{approvalMode ? 'Diferencias' : 'Pendientes'}</div>
+          <div className="mt-2 text-3xl font-extrabold">{approvalMode ? differences.length : pendingLines}</div>
         </div>
         <div className="wms-card wms-card-body">
-          <div className="text-sm font-bold text-slate-500">Ronda</div>
-          <div className="mt-2 text-3xl font-extrabold">{cycle?.round ?? '-'}</div>
+          <div className="text-sm font-bold text-slate-500">Estado</div>
+          <div className="mt-2 text-xl font-extrabold">{approvalMode ? 'Aprobacion' : recountMode ? 'Reconteo' : cycle ? 'Conteo' : '-'}</div>
         </div>
       </div>
+
+      {approvalMode ? (
+        <div className="wms-card mb-5">
+          <div className="wms-card-header">
+            <div>
+              <h3 className="font-extrabold">Diferencias pendientes de aprobacion</h3>
+              <p className="text-sm text-slate-500">Solo supervisor o administrador puede aprobar ajustes al inventario.</p>
+            </div>
+            <div className="wms-actions">
+              <button className="wms-button" onClick={() => requeueDifferences((cycle?.round ?? 1) + 1)}>Pedir reconteo</button>
+              <button className="wms-button danger" onClick={() => setCycle(null)}>Rechazar conteo</button>
+              <button className="wms-button primary" onClick={approveDifferences} disabled={!canApprove || !differences.length}>
+                Aprobar ajuste
+              </button>
+            </div>
+          </div>
+          {!canApprove ? (
+            <div className="wms-card-body rounded-none border-t border-amber-200 bg-amber-50 text-sm font-bold text-amber-900">
+              Usuario actual: {user?.roleName}. Puede revisar diferencias, pero no aprobar ajustes.
+            </div>
+          ) : null}
+          <div className="wms-table-wrap">
+            <table className="wms-table compact">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Producto</th>
+                  <th>Bodega</th>
+                  <th>Ubicacion</th>
+                  <th>Sistema</th>
+                  <th>Fisico</th>
+                  <th>Diferencia</th>
+                  <th>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {differences.map((item) => (
+                  <tr key={item.key}>
+                    <td className="font-extrabold">{item.sku}</td>
+                    <td>{item.productName}</td>
+                    <td>{item.warehouse}</td>
+                    <td>{item.location}</td>
+                    <td>{item.expected}</td>
+                    <td>{item.countedNumber}</td>
+                    <td><span className="wms-badge red">{item.difference > 0 ? `+${item.difference}` : item.difference}</span></td>
+                    <td>{item.difference > 0 ? 'Sobrante' : 'Faltante'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="wms-card mb-5">
         <div className="wms-card-header">
           <div>
-            <h3 className="font-extrabold">{cycle ? (missingMode ? 'Conteo de faltantes' : 'Conteo activo') : 'Nuevo conteo'}</h3>
+            <h3 className="font-extrabold">{cycle ? (recountMode ? 'Reconteo de diferencias' : approvalMode ? 'Conteo pendiente de aprobacion' : 'Conteo activo') : 'Nuevo conteo'}</h3>
             <p className="text-sm text-slate-500">
               {cycle ? 'Registre la cantidad fisica encontrada por linea.' : 'Seleccione cuantas lineas aleatorias desea revisar.'}
             </p>
@@ -1459,7 +1583,7 @@ function CycleCountPage() {
               </>
             ) : (
               <>
-                <button className="wms-button primary" onClick={finishRound}>Cerrar ronda</button>
+                <button className="wms-button primary" onClick={finishRound} disabled={approvalMode}>Cerrar ronda</button>
                 <button className="wms-button danger" onClick={() => setCycle(null)}>Reiniciar</button>
               </>
             )}
@@ -1477,6 +1601,7 @@ function CycleCountPage() {
                   <th>Sistema</th>
                   <th>Contado</th>
                   <th>Diferencia</th>
+                  <th>Resultado</th>
                 </tr>
               </thead>
               <tbody>
@@ -1498,11 +1623,13 @@ function CycleCountPage() {
                           value={item.counted}
                           onChange={(event) => updateCount(item.key, event.target.value)}
                           placeholder="0"
+                          disabled={approvalMode}
                         />
                       </td>
                       <td>
                         <span className={`wms-badge ${diff === '-' ? 'slate' : Number(diff) === 0 ? 'green' : 'red'}`}>{diff}</span>
                       </td>
+                      <td>{diff === '-' ? '-' : Number(diff) === 0 ? 'OK' : Number(diff) > 0 ? 'Sobrante' : 'Faltante'}</td>
                     </tr>
                   );
                 })}

@@ -1245,7 +1245,16 @@ export async function createAdjustment(body: unknown, userId: string, companyId:
     } else {
       const units = data.inventoryUnitId
         ? await tx.inventoryUnit.findMany({ where: { id: data.inventoryUnitId } })
-        : await tx.inventoryUnit.findMany({ where: { productId: data.productId, status: 'AVAILABLE', warehouse: { companyId } }, take: data.quantity });
+        : await tx.inventoryUnit.findMany({
+            where: {
+              productId: data.productId,
+              status: 'AVAILABLE',
+              warehouse: { companyId },
+              ...(data.warehouseId ? { warehouseId: data.warehouseId } : {}),
+              ...(data.locationId ? { locationId: data.locationId } : {}),
+            },
+            take: data.quantity,
+          });
       if (!units.length || (data.type === 'NEGATIVE' && units.length < data.quantity)) throw new Error('Unidad o stock no disponible');
 
       if (data.type === 'NEGATIVE') {
