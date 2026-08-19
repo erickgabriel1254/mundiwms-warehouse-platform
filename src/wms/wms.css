@@ -17,6 +17,7 @@
   flex: 1 1 auto;
   width: 100%;
   min-height: 100vh;
+  overflow-x: hidden;
   background: #f5f7fb;
   color: #111827;
   font-size: 14px;
@@ -167,6 +168,7 @@
 
 .wms-main {
   min-width: 0;
+  overflow-x: hidden;
 }
 
 .wms-header {
@@ -245,6 +247,7 @@
 .wms-content {
   width: 100%;
   min-width: 0;
+  overflow-x: hidden;
   padding: 24px;
 }
 
@@ -477,6 +480,7 @@
 
 .wms-table-wrap {
   width: 100%;
+  min-width: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -900,7 +904,7 @@
 
 @media (max-width: 640px) {
   .wms-shell {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .wms-grid.cols-2,
@@ -947,9 +951,9 @@
   }
 
   .wms-company-select {
-    width: 104px;
+    width: 118px;
     min-width: 0;
-    max-width: 104px;
+    max-width: 118px;
     gap: 0;
   }
 
@@ -970,7 +974,7 @@
 
   .wms-content {
     max-width: 100vw;
-    padding: 10px 8px;
+    padding: 8px 7px;
   }
 
   .wms-page-title {
@@ -1015,7 +1019,11 @@
   }
 
   .wms-card-body {
-    padding: 10px;
+    padding: 9px;
+  }
+
+  .wms-card-body.h-80 {
+    height: 240px;
   }
 
   .wms-grid {
@@ -1053,9 +1061,9 @@
   .wms-select,
   .wms-textarea,
   .wms-button {
-    min-height: 34px;
-    padding: 7px 9px;
-    font-size: 13px;
+    min-height: 32px;
+    padding: 6px 8px;
+    font-size: 12px;
   }
 
   .wms-label {
@@ -1071,12 +1079,75 @@
     flex: 1 1 auto;
   }
 
-  .wms-table {
-    min-width: 640px;
-  }
-
   .wms-table-wrap {
     max-width: 100%;
+  }
+
+  .wms-table:not(.wms-responsive-table) {
+    min-width: 520px;
+  }
+
+  .wms-inner-table,
+  .wms-table.compact {
+    min-width: 500px;
+  }
+
+  .wms-responsive-table {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0 8px;
+  }
+
+  .wms-responsive-table thead {
+    display: none;
+  }
+
+  .wms-responsive-table,
+  .wms-responsive-table tbody,
+  .wms-responsive-table tr,
+  .wms-responsive-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .wms-responsive-table tr {
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #ffffff;
+  }
+
+  .wms-responsive-table td {
+    display: grid;
+    grid-template-columns: minmax(82px, 34%) minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    border-top: 1px solid #eef2f7;
+    padding: 8px 10px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .wms-responsive-table td:first-child {
+    border-top: 0;
+  }
+
+  .wms-responsive-table td::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .wms-responsive-table td[colspan] {
+    display: block;
+    text-align: center;
+  }
+
+  .wms-responsive-table td[colspan]::before {
+    content: none;
   }
 
   .wms-warehouse-card {
@@ -1131,19 +1202,21 @@
 
   .wms-location-map {
     width: 100%;
-    gap: 10px;
-    overflow-x: auto;
-    padding: 10px;
-    touch-action: pan-x pan-y;
+    gap: 9px;
+    overflow-x: visible;
+    padding: 8px;
+    touch-action: pan-y;
   }
 
   .wms-rack-row {
-    width: max-content;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
   }
 
   .wms-rack {
-    min-width: 118px;
-    padding: 8px;
+    min-width: 0;
+    padding: 7px;
   }
 
   .wms-slot-grid {
@@ -1175,6 +1248,13 @@
     width: 100%;
     max-height: 100vh;
     border-radius: 0;
+  }
+
+  .wms-modal .wms-card-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #ffffff;
   }
 
   .wms-logo {
@@ -1210,9 +1290,9 @@
   }
 
   .wms-company-select {
-    width: 86px;
+    width: 108px;
     min-width: 0;
-    max-width: 86px;
+    max-width: 108px;
   }
 
   .wms-company-select select {
@@ -1228,7 +1308,7 @@
 
   .wms-content {
     max-width: 100vw;
-    padding: 8px 6px;
+    padding: 7px 5px;
   }
 
   .wms-page-title {
@@ -1255,12 +1335,22 @@
     grid-template-columns: minmax(0, 1fr) 38px;
   }
 
-  .wms-table {
-    min-width: 560px;
+  .wms-responsive-table td {
+    grid-template-columns: minmax(76px, 36%) minmax(0, 1fr);
+    padding: 7px 8px;
   }
 
   .wms-inner-table {
-    min-width: 560px;
+    min-width: 460px;
+  }
+
+  .wms-table:not(.wms-responsive-table),
+  .wms-table.compact {
+    min-width: 460px;
+  }
+
+  .wms-rack-row {
+    grid-template-columns: 1fr;
   }
 
   .wms-card-header {

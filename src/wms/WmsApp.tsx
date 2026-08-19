@@ -440,9 +440,13 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 function DataTable<T>({ data, columns, onRowClick }: { data: T[]; columns: ColumnDef<T>[]; onRowClick?: (row: T) => void }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const table = useReactTable({ data, columns, state: { sorting }, onSortingChange: setSorting, getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() });
+  const mobileLabel = (cell: ReturnType<typeof table.getRowModel>['rows'][number]['getVisibleCells'][number]) => {
+    const header = cell.column.columnDef.header;
+    return typeof header === 'string' ? header : cell.column.id;
+  };
   return (
     <div className="wms-table-wrap">
-      <table className="wms-table">
+      <table className="wms-table wms-responsive-table">
         <thead>
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
@@ -458,7 +462,9 @@ function DataTable<T>({ data, columns, onRowClick }: { data: T[]; columns: Colum
           {table.getRowModel().rows.map((row) => (
             <tr key={row.id} className={onRowClick ? 'wms-clickable-row' : ''} onClick={() => onRowClick?.(row.original)}>
               {row.getVisibleCells().map((cell) => (
-                <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                <td key={cell.id} data-label={mobileLabel(cell)}>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
               ))}
             </tr>
           ))}
