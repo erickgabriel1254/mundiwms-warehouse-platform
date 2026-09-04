@@ -3761,7 +3761,7 @@ function PackingPage() {
                   <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
                     <FileDown size={16} /> PDF
                   </button>
-                  <button className="wms-button" onClick={() => printOutboundLabels(row.original)}>
+                  <button className="wms-button" onClick={() => void printOutboundLabelsDirect(row.original)}>
                     <Printer size={16} /> Imprimir
                   </button>
                   <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
@@ -3847,7 +3847,7 @@ function ShippingPage() {
                   <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
                     <FileDown size={16} /> PDF
                   </button>
-                  <button className="wms-button" onClick={() => printOutboundLabels(row.original)}>
+                  <button className="wms-button" onClick={() => void printOutboundLabelsDirect(row.original)}>
                     <Printer size={16} /> Imprimir
                   </button>
                   <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
@@ -4169,6 +4169,26 @@ function downloadOutboundLabels(order: OutboundOrder) {
   toast.success('Etiquetas ZPL generadas');
 }
 
+async function printOutboundLabelsDirect(order: OutboundOrder) {
+  try {
+    toast.info('Conectando con QZ Tray...');
+    const qzModule = await import('qz-tray');
+    const qz = qzModule.default;
+    if (!qz.websocket.isActive()) await qz.websocket.connect();
+    const zebraPrinters = await qz.printers.find('zebra').catch(() => []);
+    const printerFromSearch = Array.isArray(zebraPrinters) ? zebraPrinters[0] : zebraPrinters;
+    const printerName = printerFromSearch || await qz.printers.getDefault();
+    if (!printerName) throw new Error('No se encontro una impresora configurada');
+    const config = qz.configs.create(printerName, { encoding: 'UTF-8' });
+    await qz.print(config, [{ type: 'raw', format: 'command', flavor: 'plain', data: generateOutboundZpl(order) }]);
+    toast.success(`Etiquetas enviadas a ${printerName}`);
+  } catch (error) {
+    console.warn('QZ Tray no disponible, usando impresion del navegador', error);
+    toast.error('QZ Tray no esta disponible; se abrira la impresion del navegador');
+    printOutboundLabels(order);
+  }
+}
+
 function printOutboundLabels(order: OutboundOrder) {
   const labels = order.items.flatMap((item, index) => {
     const serials = item.serialNumbers.length ? item.serialNumbers : [`QTY-${item.quantity}`];
@@ -4300,7 +4320,7 @@ function OrdersTable({
                   <FileDown size={16} /> PDF
                 </button>
                 {type === 'outbound' ? (
-                  <button className="wms-button" onClick={() => printOutboundLabels(row.original as OutboundOrder)}>
+                  <button className="wms-button" onClick={() => void printOutboundLabelsDirect(row.original as OutboundOrder)}>
                     <Printer size={16} /> Imprimir
                   </button>
                 ) : null}
