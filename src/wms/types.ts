@@ -255,6 +255,16 @@ export type DashboardData = {
   byCategory: { category: string; total: number }[];
   lowStockProducts: { id: string; sku: string; name: string; stockMin: number; available: number }[];
   topMovingProducts: { id: string; sku: string; name: string; movements: number; quantity: number }[];
+  userKpis: {
+    userId: string;
+    user: string;
+    role: string;
+    pendingPicking: number;
+    dispatched: number;
+    shipped: number;
+    avgDispatchHours: number;
+    avgShipmentHours: number;
+  }[];
 };
 
 export type PickingPlanItem = {
@@ -265,6 +275,8 @@ export type PickingPlanItem = {
   productId: string;
   sku: string;
   product: string;
+  barcode?: string | null;
+  barcodes: string[];
   quantity: number;
   serials: string[];
   lots: string[];

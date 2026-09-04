@@ -396,7 +396,7 @@ function LoginPage() {
           </button>
           <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
             <div>admin@mundiwms.local / Admin123!</div>
-            <div>bodega@mundiwms.local / Bodega123!</div>
+            <div>despachador@mundiwms.local / Despacho123!</div>
             <div>supervisor@mundiwms.local / Supervisor123!</div>
           </div>
         </div>
@@ -506,9 +506,9 @@ function DashboardPage() {
   const { data, loading } = useLoad<DashboardData>(() => wmsApi.dashboard(), []);
   if (loading || !data) return <ScreenState title="Calculando dashboard" />;
   const cards = [
-    ['Recepciones abiertas', data.totals.inboundPending],
-    ['Despachos abiertos', data.totals.outboundPending],
-    ['Pendientes de cierre', data.totals.pendingClosure],
+    ['Recepciones por ingresar', data.totals.inboundPending],
+    ['Picking pendiente', data.totals.outboundPending],
+    ['Despachos listos', data.totals.outboundDispatched],
     ['Bajo stock', data.totals.lowStock],
   ];
   return (
@@ -556,6 +556,39 @@ function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      </div>
+      <div className="wms-card mb-5">
+        <div className="wms-card-header">
+          <h3 className="font-extrabold">Control por usuario</h3>
+        </div>
+        <div className="wms-card-body grid gap-4">
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={data.userKpis} margin={{ left: 8, right: 16 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="user" tick={{ fontSize: 10 }} />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="pendingPicking" name="Picking pendiente" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="dispatched" name="Despachado" fill="#dc2626" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="shipped" name="Enviado" fill="#16a34a" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <DataTable
+            data={data.userKpis}
+            columns={[
+              { header: 'Usuario', accessorKey: 'user' },
+              { header: 'Rol', accessorKey: 'role' },
+              { header: 'Picking pendiente', accessorKey: 'pendingPicking' },
+              { header: 'Despachado', accessorKey: 'dispatched' },
+              { header: 'Enviado', accessorKey: 'shipped' },
+              { header: 'Prom. despacho h', accessorKey: 'avgDispatchHours' },
+              { header: 'Prom. envio h', accessorKey: 'avgShipmentHours' },
+            ]}
+          />
         </div>
       </div>
       <MovementsCard movements={data.recentMovements} />
@@ -1735,9 +1768,23 @@ function compareLocationLayout(a: Location, b: Location) {
 }
 
 function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void }) {
+  const [rackDetail, setRackDetail] = useState<{ aisle: string; rack: string; locations: Location[] } | null>(null);
   const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
   const hasBlueprint = warehouseLocations.some((location) => (location.mapX ?? 0) > 0 || (location.mapY ?? 0) > 0 || (location.mapW ?? 1) > 1 || (location.mapH ?? 1) > 1);
   const aisles = Array.from(new Set(warehouseLocations.map((location) => location.aisle || 'General'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  const rackGroups = Array.from(
+    warehouseLocations.reduce((map, location) => {
+      const aisle = location.aisle || 'General';
+      const rack = location.rack || 'Sin rack';
+      const key = `${aisle}|${rack}`;
+      const current = map.get(key) ?? { aisle, rack, locations: [] as Location[] };
+      current.locations.push(location);
+      map.set(key, current);
+      return map;
+    }, new Map<string, { aisle: string; rack: string; locations: Location[] }>()),
+  )
+    .map(([, value]) => ({ ...value, locations: value.locations.sort(compareLocationLayout) }))
+    .sort((a, b) => `${a.aisle}|${a.rack}`.localeCompare(`${b.aisle}|${b.rack}`, 'es', { numeric: true }));
   if (!warehouseLocations.length) {
     return <div className="wms-empty-map">Sin ubicaciones creadas para esta bodega.</div>;
   }
@@ -1746,71 +1793,131 @@ function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: War
     const cols = Math.max(8, ...warehouseLocations.map((location) => (location.mapX ?? 0) + (location.mapW ?? 1) + 1));
     const rows = Math.max(6, ...warehouseLocations.map((location) => (location.mapY ?? 0) + (location.mapH ?? 1) + 1));
     return (
-      <div
-        className="wms-location-blueprint"
-        style={{
-          gridTemplateColumns: `repeat(${cols}, minmax(36px, 1fr))`,
-          gridTemplateRows: `repeat(${rows}, 42px)`,
-        }}
-      >
-        {warehouseLocations.map((location) => {
-          const stats = getLocationStats(location);
-          const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
-          return (
-            <button
-              className={`wms-blueprint-slot ${state}`}
-              key={location.id}
-              onClick={() => onEdit(location)}
-              title={`${location.name} - ${stats.total} unidades`}
-              style={{
-                gridColumn: `${(location.mapX ?? 0) + 1} / span ${location.mapW ?? 1}`,
-                gridRow: `${(location.mapY ?? 0) + 1} / span ${location.mapH ?? 1}`,
-              }}
-            >
-              <span>{location.code}</span>
-              <strong>{stats.total}</strong>
-              <small>Ruta {location.pickSequence || '-'}</small>
-            </button>
-          );
-        })}
-      </div>
+      <>
+        <div
+          className="wms-location-blueprint"
+          style={{
+            gridTemplateColumns: `repeat(${cols}, minmax(36px, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, 42px)`,
+          }}
+        >
+          {warehouseLocations.map((location) => {
+            const stats = getLocationStats(location);
+            const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
+            return (
+              <button
+                className={`wms-blueprint-slot ${state}`}
+                key={location.id}
+                onClick={() => onEdit(location)}
+                title={`${location.name} - ${stats.total} unidades`}
+                style={{
+                  gridColumn: `${(location.mapX ?? 0) + 1} / span ${location.mapW ?? 1}`,
+                  gridRow: `${(location.mapY ?? 0) + 1} / span ${location.mapH ?? 1}`,
+                }}
+              >
+                <span>{location.code}</span>
+                <strong>{stats.total}</strong>
+                <small>Ruta {location.pickSequence || '-'}</small>
+              </button>
+            );
+          })}
+        </div>
+        <div className="wms-rack-summary">
+          {rackGroups.map((group) => {
+            const total = group.locations.reduce((sum, location) => sum + getLocationStats(location).total, 0);
+            return (
+              <button className="wms-rack-summary-item" key={`${group.aisle}-${group.rack}`} onClick={() => setRackDetail(group)}>
+                <strong>Rack {group.rack}</strong>
+                <span>Pasillo {group.aisle}</span>
+                <small>{total} unidades / {group.locations.length} posiciones</small>
+              </button>
+            );
+          })}
+        </div>
+        {rackDetail ? <RackFrontModal rack={rackDetail} onClose={() => setRackDetail(null)} onEdit={onEdit} /> : null}
+      </>
     );
   }
 
   return (
-    <div className="wms-location-map">
-      {aisles.map((aisle) => {
-        const aisleLocations = warehouseLocations.filter((location) => (location.aisle || 'General') === aisle);
-        const racks = Array.from(new Set(aisleLocations.map((location) => location.rack || 'Sin rack'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
-        return (
-          <section className="wms-aisle" key={aisle}>
-            <div className="wms-aisle-title">Pasillo {aisle}</div>
-            <div className="wms-rack-row">
-              {racks.map((rack) => {
-                const rackLocations = aisleLocations.filter((location) => (location.rack || 'Sin rack') === rack).sort(compareLocationLayout);
-                return (
-                  <div className="wms-rack" key={`${aisle}-${rack}`}>
-                    <div className="wms-rack-title">Rack {rack}</div>
-                    <div className="wms-slot-grid">
-                      {rackLocations.map((location) => {
-                        const stats = getLocationStats(location);
-                        const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
-                        return (
-                          <button className={`wms-slot ${state}`} key={location.id} onClick={() => onEdit(location)} title={`${location.name} - ${stats.total} unidades`}>
-                            <span>{location.level || 'N'}-{location.position || 'P'}</span>
-                            <strong>{stats.total}</strong>
-                          </button>
-                        );
-                      })}
+    <>
+      <div className="wms-location-map">
+        {aisles.map((aisle) => {
+          const aisleLocations = warehouseLocations.filter((location) => (location.aisle || 'General') === aisle);
+          const racks = Array.from(new Set(aisleLocations.map((location) => location.rack || 'Sin rack'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+          return (
+            <section className="wms-aisle" key={aisle}>
+              <div className="wms-aisle-title">Pasillo {aisle}</div>
+              <div className="wms-rack-row">
+                {racks.map((rack) => {
+                  const rackLocations = aisleLocations.filter((location) => (location.rack || 'Sin rack') === rack).sort(compareLocationLayout);
+                  return (
+                    <div className="wms-rack" key={`${aisle}-${rack}`}>
+                      <button className="wms-rack-title clickable" onClick={() => setRackDetail({ aisle, rack, locations: rackLocations })}>Rack {rack}</button>
+                      <div className="wms-slot-grid">
+                        {rackLocations.map((location) => {
+                          const stats = getLocationStats(location);
+                          const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
+                          return (
+                            <button className={`wms-slot ${state}`} key={location.id} onClick={() => onEdit(location)} title={`${location.name} - ${stats.total} unidades`}>
+                              <span>{location.level || 'N'}-{location.position || 'P'}</span>
+                              <strong>{stats.total}</strong>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
-    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      {rackDetail ? <RackFrontModal rack={rackDetail} onClose={() => setRackDetail(null)} onEdit={onEdit} /> : null}
+    </>
+  );
+}
+
+function RackFrontModal({ rack, onClose, onEdit }: { rack: { aisle: string; rack: string; locations: Location[] }; onClose: () => void; onEdit: (location: Location) => void }) {
+  const levels = Array.from(new Set(rack.locations.map((location) => location.level || 'N/A'))).sort((a, b) => b.localeCompare(a, 'es', { numeric: true }));
+  const positions = Array.from(new Set(rack.locations.map((location) => location.position || 'N/A'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  return (
+    <Modal title={`Rack ${rack.rack} / Pasillo ${rack.aisle}`} onClose={onClose}>
+      <div className="wms-rack-front">
+        <div className="wms-rack-front-grid" style={{ gridTemplateColumns: `88px repeat(${positions.length}, minmax(92px, 1fr))` }}>
+          <div className="wms-rack-front-head">Nivel</div>
+          {positions.map((position) => <div className="wms-rack-front-head" key={position}>Pos. {position}</div>)}
+          {levels.flatMap((level) => [
+            <div className="wms-rack-front-level" key={`${level}-label`}>Nivel {level}</div>,
+            ...positions.map((position) => {
+              const location = rack.locations.find((item) => (item.level || 'N/A') === level && (item.position || 'N/A') === position);
+              if (!location) return <div className="wms-rack-front-empty" key={`${level}-${position}`}>Sin posicion</div>;
+              const stats = getLocationStats(location);
+              const products = (location.inventoryBalances ?? [])
+                .filter((balance) => balance.quantity > 0)
+                .slice(0, 3)
+                .map((balance) => `${balance.product?.sku ?? 'SKU'} (${balance.quantity})`);
+              const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
+              return (
+                <button
+                  className={`wms-rack-front-slot ${state}`}
+                  key={`${level}-${position}`}
+                  onClick={() => {
+                    onClose();
+                    onEdit(location);
+                  }}
+                >
+                  <strong>{location.code}</strong>
+                  <span>{stats.total} unidades</span>
+                  <small>{products.length ? products.join(' / ') : 'Libre'}</small>
+                </button>
+              );
+            }),
+          ])}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -2341,6 +2448,14 @@ function getAvailableInWarehouse(catalogs: Catalogs, productId: string, warehous
 
 function formatDateOnly(value?: string | null) {
   return value ? new Date(value).toLocaleDateString() : '-';
+}
+
+function pickingItemKey(item: PickingPlan['items'][number], index: number) {
+  return `${item.orderId}:${item.locationId}:${item.productId}:${index}`;
+}
+
+function normalizeScan(value: string) {
+  return value.trim().toUpperCase();
 }
 
 type OrderPayload = {
@@ -3167,21 +3282,55 @@ function OutboundPage() {
 function PickingPage() {
   const orders = useLoad(() => wmsApi.outbound(), []);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [scan, setScan] = useState('');
+  const [pickedKeys, setPickedKeys] = useState<string[]>([]);
   const selectedKey = selectedIds.join(',');
   const plan = useLoad<PickingPlan>(() => wmsApi.pickingPlan(selectedIds), [selectedKey]);
-  const eligibleOrders = (orders.data ?? []).filter((order) => ['RESERVED', 'DISPATCHED'].includes(order.status));
+  const eligibleOrders = (orders.data ?? []).filter((order) => order.status === 'RESERVED');
   const displayPlan = plan.data;
+  const routeItems = displayPlan?.items ?? [];
+  const routeKey = routeItems.map((item, index) => pickingItemKey(item, index)).join('|');
   const selectedSet = new Set(selectedIds);
+  const pickedSet = new Set(pickedKeys);
+  const currentIndex = routeItems.findIndex((item, index) => !pickedSet.has(pickingItemKey(item, index)));
+  const currentItem = currentIndex >= 0 ? routeItems[currentIndex] : null;
+  const allPicked = routeItems.length > 0 && routeItems.every((item, index) => pickedSet.has(pickingItemKey(item, index)));
+  const pickedUnits = routeItems.reduce((sum, item, index) => sum + (pickedSet.has(pickingItemKey(item, index)) ? item.quantity : 0), 0);
+  useEffect(() => {
+    setPickedKeys([]);
+    setScan('');
+  }, [selectedKey]);
+  useEffect(() => {
+    setPickedKeys((current) => current.filter((key) => routeKey.includes(key)));
+  }, [routeKey]);
   const toggle = (id: string) => {
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
   const selectAll = () => setSelectedIds(eligibleOrders.map((order) => order.id));
-  const complete = async (action: 'dispatch' | 'ship') => {
-    const ids = selectedIds.length ? selectedIds : eligibleOrders.map((order) => order.id);
+  const validateScan = (event: FormEvent) => {
+    event.preventDefault();
+    if (!currentItem) return toast.success('Ruta completamente recogida');
+    const scanned = normalizeScan(scan);
+    if (!scanned) return;
+    const accepted = [currentItem.sku, currentItem.barcode ?? '', ...currentItem.barcodes, ...currentItem.serials].map(normalizeScan).filter(Boolean);
+    if (!accepted.includes(scanned)) {
+      toast.error(`No coincide con ${currentItem.sku}. Revise producto, codigo de barras o serie.`);
+      setScan('');
+      return;
+    }
+    setPickedKeys((current) => [...current, pickingItemKey(currentItem, currentIndex)]);
+    setScan('');
+    toast.success(`${currentItem.sku} recogido`);
+  };
+  const complete = async () => {
+    if (!allPicked) return toast.error('Debe escanear todos los puntos de la ruta antes de finalizar');
+    const ids = selectedIds.length ? selectedIds : displayPlan?.orders.map((order) => order.id) ?? [];
     if (!ids.length) return toast.error('No hay despachos para procesar');
     try {
-      await wmsApi.completePicking(ids, action);
-      toast.success(action === 'ship' ? 'Picking y envio completados' : 'Picking despachado');
+      await wmsApi.completePicking(ids, 'dispatch');
+      toast.success('Picking finalizado y despachos pasados a Despachado');
+      setSelectedIds([]);
+      setPickedKeys([]);
       orders.refresh();
       plan.refresh();
     } catch (error) {
@@ -3196,8 +3345,7 @@ function PickingPage() {
         action={
           <div className="wms-actions">
             <button className="wms-button" onClick={selectAll}>Seleccionar todo</button>
-            <button className="wms-button primary" onClick={() => complete('dispatch')}><RouteIcon size={16} /> Marcar despachado</button>
-            <button className="wms-button primary" onClick={() => complete('ship')}><Send size={16} /> Despachar y enviar</button>
+            <button className="wms-button primary" onClick={complete} disabled={!allPicked}><RouteIcon size={16} /> Finalizar picking</button>
           </div>
         }
       />
@@ -3205,12 +3353,41 @@ function PickingPage() {
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Pedidos</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.orders ?? 0}</div></div>
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Lineas</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.lines ?? 0}</div></div>
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Unidades</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.units ?? 0}</div></div>
-        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Ubicaciones</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.locations ?? 0}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Recogido</div><div className="mt-2 text-3xl font-extrabold">{pickedUnits}/{displayPlan?.totals.units ?? 0}</div></div>
       </div>
+      <form className="wms-card mb-5" onSubmit={validateScan}>
+        <div className="wms-card-header">
+          <div>
+            <h3 className="font-extrabold">Escaneo de picking</h3>
+            <p className="text-sm text-slate-500">{currentItem ? `Siguiente: ${currentItem.locationCode} / ${currentItem.sku}` : 'Ruta completa'}</p>
+          </div>
+          <button className="wms-button primary" disabled={!currentItem}>
+            Validar
+          </button>
+        </div>
+        <div className="wms-card-body wms-scan-panel">
+          <input
+            className="wms-input"
+            value={scan}
+            onChange={(event) => setScan(event.target.value)}
+            placeholder="Escanee codigo de barras, SKU o serie"
+            autoFocus
+          />
+          {currentItem ? (
+            <div className="wms-next-pick">
+              <strong>{currentItem.product}</strong>
+              <span>{currentItem.warehouse} / {currentItem.location}</span>
+              <span>Cantidad {currentItem.quantity} / Lote {currentItem.lots.length ? currentItem.lots.join(', ') : '-'} / Vence {formatDateOnly(currentItem.expirationDate)}</span>
+            </div>
+          ) : (
+            <div className="wms-next-pick done">Todo el recorrido fue validado. Ya puede finalizar picking.</div>
+          )}
+        </div>
+      </form>
       <div className="wms-grid cols-2">
         <div className="wms-card">
           <div className="wms-card-header">
-            <h3 className="font-extrabold">Despachos disponibles</h3>
+            <h3 className="font-extrabold">Pendientes por recoger</h3>
           </div>
           <div className="wms-card-body grid gap-2">
             {eligibleOrders.map((order) => (
@@ -3222,7 +3399,7 @@ function PickingPage() {
                 </span>
               </label>
             ))}
-            {!eligibleOrders.length ? <div className="text-sm text-slate-500">No hay despachos reservados o despachados para picking.</div> : null}
+            {!eligibleOrders.length ? <div className="text-sm text-slate-500">No hay despachos reservados pendientes de recoger.</div> : null}
           </div>
         </div>
         <div className="wms-card">
@@ -3233,7 +3410,7 @@ function PickingPage() {
           <div className="wms-card-body">
             <div className="wms-picking-route">
               {(displayPlan?.items ?? []).map((item, index) => (
-                <div className="wms-picking-step" key={`${item.orderId}-${item.productId}-${item.locationId}-${index}`}>
+                <div className={`wms-picking-step ${pickedSet.has(pickingItemKey(item, index)) ? 'picked' : index === currentIndex ? 'current' : ''}`} key={`${item.orderId}-${item.productId}-${item.locationId}-${index}`}>
                   <div className="wms-picking-index">{index + 1}</div>
                   <div>
                     <div className="font-extrabold">{item.locationCode} / {item.location}</div>
@@ -3244,11 +3421,12 @@ function PickingPage() {
                       <span>Lote {item.lots.length ? item.lots.join(', ') : '-'}</span>
                       <span>Vence {formatDateOnly(item.expirationDate)}</span>
                       {item.serials.length ? <span>Series {item.serials.join(', ')}</span> : null}
+                      {pickedSet.has(pickingItemKey(item, index)) ? <span>Recogido</span> : null}
                     </div>
                   </div>
                 </div>
               ))}
-              {!displayPlan?.items?.length ? <div className="text-sm text-slate-500">Seleccione despachos o genere reservas para ver la ruta.</div> : null}
+              {!displayPlan?.items?.length ? <div className="text-sm text-slate-500">Seleccione despachos reservados o genere reservas para ver la ruta.</div> : null}
             </div>
           </div>
         </div>

@@ -343,11 +343,12 @@ export async function getCatalogs(companyId: string) {
 }
 
 export async function getDashboard(companyId: string) {
-  const [products, units, inboundPending, outboundPending, outboundDispatched, movements, movementProducts, categoryProducts] = await Promise.all([
+  const since30Days = new Date(Date.now() - 30 * 86400000);
+  const [products, units, inboundPending, outboundPending, outboundDispatched, movements, movementProducts, categoryProducts, outboundForKpis, users] = await Promise.all([
     prisma.product.findMany({ include: { inventoryBalances: { where: { warehouse: { companyId } } } } }),
     prisma.inventoryUnit.findMany({ where: { warehouse: { companyId } } }),
     prisma.inboundOrder.count({ where: { companyId, status: { in: ['DRAFT', 'PENDING'] } } }),
-    prisma.outboundOrder.count({ where: { companyId, status: { in: ['DRAFT', 'RESERVED'] } } }),
+    prisma.outboundOrder.count({ where: { companyId, status: 'RESERVED' } }),
     prisma.outboundOrder.count({ where: { companyId, status: 'DISPATCHED' } }),
     prisma.kardexMovement.findMany({
       where: { warehouse: { companyId } },
@@ -362,6 +363,11 @@ export async function getDashboard(companyId: string) {
       include: { product: true },
     }),
     prisma.product.groupBy({ by: ['category'], _count: { _all: true } }),
+    prisma.outboundOrder.findMany({
+      where: { companyId, createdAt: { gte: since30Days } },
+      include: { createdBy: { include: { role: true } } },
+    }),
+    prisma.user.findMany({ include: { role: true } }),
   ]);
 
   const lowStockProducts = products.map((product) => {
@@ -387,6 +393,31 @@ export async function getDashboard(companyId: string) {
     }, new Map<string, { id: string; sku: string; name: string; movements: number; quantity: number }>()),
   ).map(([, value]) => value).sort((a, b) => b.movements - a.movements).slice(0, 8);
 
+  const userKpis = users
+    .map((user) => {
+      const rows = outboundForKpis.filter((order) => order.createdById === user.id);
+      const dispatchHours = rows
+        .filter((order) => order.confirmedAt)
+        .map((order) => Math.max(0, Number(((order.confirmedAt!.getTime() - order.createdAt.getTime()) / 3600000).toFixed(1))));
+      const shipmentHours = rows
+        .filter((order) => order.status === 'SHIPPED')
+        .map((order) => {
+          const closeDate = order.confirmedAt ?? order.createdAt;
+          return Math.max(0, Number(((closeDate.getTime() - order.createdAt.getTime()) / 3600000).toFixed(1)));
+        });
+      return {
+        userId: user.id,
+        user: user.name,
+        role: user.role.name,
+        pendingPicking: rows.filter((order) => order.status === 'RESERVED').length,
+        dispatched: rows.filter((order) => order.status === 'DISPATCHED').length,
+        shipped: rows.filter((order) => order.status === 'SHIPPED').length,
+        avgDispatchHours: dispatchHours.length ? Number((dispatchHours.reduce((sum, value) => sum + value, 0) / dispatchHours.length).toFixed(1)) : 0,
+        avgShipmentHours: shipmentHours.length ? Number((shipmentHours.reduce((sum, value) => sum + value, 0) / shipmentHours.length).toFixed(1)) : 0,
+      };
+    })
+    .sort((a, b) => b.pendingPicking + b.dispatched + b.shipped - (a.pendingPicking + a.dispatched + a.shipped));
+
   return {
     totals: {
       skus: products.length,
@@ -404,6 +435,7 @@ export async function getDashboard(companyId: string) {
     byCategory: categoryProducts.map((item) => ({ category: item.category, total: item._count._all })),
     lowStockProducts: lowStockProducts.sort((a, b) => a.available - b.available).slice(0, 8),
     topMovingProducts,
+    userKpis,
   };
 }
 
@@ -1241,7 +1273,7 @@ export async function getPickingPlan(query: URLSearchParams, companyId: string) 
   const orders = await prisma.outboundOrder.findMany({
     where: {
       companyId,
-      status: { in: ['RESERVED', 'DISPATCHED'] },
+      status: 'RESERVED',
       ...(orderIds.length ? { id: { in: orderIds } } : {}),
     },
     orderBy: { createdAt: 'asc' },
@@ -1255,6 +1287,8 @@ export async function getPickingPlan(query: URLSearchParams, companyId: string) 
     productId: string;
     sku: string;
     product: string;
+    barcode: string | null;
+    barcodes: string[];
     quantity: number;
     serials: string[];
     lots: string[];
@@ -1305,6 +1339,8 @@ export async function getPickingPlan(query: URLSearchParams, companyId: string) 
           productId: item.productId,
           sku: item.product.sku,
           product: item.product.name,
+          barcode: item.product.barcode,
+          barcodes: item.product.barcodes,
           quantity: group.length,
           serials: group.map((unit) => unit.serialNumber).filter((serial): serial is string => Boolean(serial)),
           lots: Array.from(new Set(group.map((unit) => unit.lotNumber).filter((lot): lot is string => Boolean(lot)))),

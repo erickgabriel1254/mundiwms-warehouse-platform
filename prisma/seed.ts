@@ -73,7 +73,7 @@ async function main() {
 
   const [adminRole, operatorRole, supervisorRole] = await Promise.all([
     prisma.role.create({ data: { code: 'ADMIN', name: 'Administrador', permissions: adminPermissions } }),
-    prisma.role.create({ data: { code: 'OPERATOR', name: 'Operador de bodega', permissions: operatorPermissions } }),
+    prisma.role.create({ data: { code: 'OPERATOR', name: 'Despachador', permissions: operatorPermissions } }),
     prisma.role.create({ data: { code: 'SUPERVISOR', name: 'Supervisor', permissions: supervisorPermissions } }),
   ]);
 
@@ -88,9 +88,9 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        name: 'Operador Quito',
-        email: 'bodega@mundiwms.local',
-        passwordHash: hashPassword('Bodega123!'),
+        name: 'Despachador',
+        email: 'despachador@mundiwms.local',
+        passwordHash: hashPassword('Despacho123!'),
         roleId: operatorRole.id,
       },
     }),
@@ -467,7 +467,7 @@ async function main() {
   console.log('Seed WMS completado');
   console.log('Usuarios iniciales:');
   console.log('admin@mundiwms.local / Admin123!');
-  console.log('bodega@mundiwms.local / Bodega123!');
+  console.log('despachador@mundiwms.local / Despacho123!');
   console.log('supervisor@mundiwms.local / Supervisor123!');
 }
 
