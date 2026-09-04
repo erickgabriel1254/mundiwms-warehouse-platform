@@ -1911,7 +1911,9 @@ function WarehouseLocationMap({ warehouse, locations, onEdit, onChanged }: { war
 
   return (
     <>
-      <WarehouseFloorPlan rackGroups={rackGroups} onSelectRack={setRackDetail} />
+      <div className="wms-warehouse-map-scroll" aria-label="Mapa desplazable de racks">
+        <WarehouseFloorPlan rackGroups={rackGroups} onSelectRack={setRackDetail} />
+      </div>
       <div className="wms-rack-summary">
         {rackGroups.map((group) => (
           <button className="wms-rack-summary-item" key={`${group.aisle}-${group.rack}`} onClick={() => setRackDetail(group)}>
@@ -2304,9 +2306,9 @@ function WarehousesPage() {
                   <span><i className="filled" /> Con stock</span>
                   <span><i className="reserved" /> Con reserva</span>
                 </div>
-                <div>
+                <div className="wms-warehouse-list-section">
                   <div className="mb-2 text-sm font-extrabold text-slate-700">Listado de ubicaciones disponibles</div>
-                  <div className="wms-table-wrap">
+                  <div className="wms-table-wrap wms-warehouse-table-scroll">
                     <table className="wms-table compact">
                       <thead>
                         <tr>

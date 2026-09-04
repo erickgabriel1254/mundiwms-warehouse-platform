@@ -5,6 +5,11 @@
   --wms-primary-strong: #991b1b;
 }
 
+.wms-shell,
+.wms-shell * {
+  box-sizing: border-box;
+}
+
 .wms-shell.theme-red,
 .wms-shell.theme-blue {
   --wms-primary: #dc2626;
@@ -485,6 +490,17 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.wms-warehouse-table-scroll {
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+}
+
+.wms-warehouse-table-scroll .wms-table {
+  width: max-content;
+  min-width: 1040px;
+}
+
 .wms-table {
   width: 100%;
   min-width: 920px;
@@ -801,6 +817,23 @@
   background: linear-gradient(90deg, #eef2f7 1px, transparent 1px), linear-gradient(#eef2f7 1px, transparent 1px), #ffffff;
   background-size: 34px 34px;
   padding: 12px;
+}
+
+.wms-warehouse-map-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+}
+
+.wms-warehouse-list-section {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .wms-floor-zone-label {
@@ -1655,7 +1688,8 @@
   }
 
   .wms-content {
-    max-width: 100vw;
+    width: 100%;
+    max-width: 100%;
     padding: 8px 7px;
   }
 
@@ -1838,15 +1872,27 @@
     overflow: visible;
   }
 
+  .wms-warehouse-card .wms-card-body,
+  .wms-warehouse-card .wms-card-body > *,
+  .wms-warehouse-list-section {
+    max-width: 100%;
+    min-width: 0;
+  }
+
   .wms-warehouse-card .wms-table-wrap {
+    display: block;
+    width: 100%;
+    max-width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
   }
 
-  .wms-warehouse-card .wms-table.compact {
-    min-width: 980px;
+  .wms-warehouse-table-scroll .wms-table.compact {
+    width: max-content;
+    min-width: 1040px;
   }
 
   .wms-warehouse-card .wms-card-header {
@@ -1908,14 +1954,16 @@
   .wms-location-map {
     width: 100%;
     gap: 9px;
-    overflow-x: visible;
+    overflow-x: auto;
     padding: 8px;
-    touch-action: pan-y;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
   }
 
   .wms-location-blueprint {
-    grid-template-columns: 1fr !important;
-    grid-template-rows: none !important;
+    grid-template-columns: repeat(8, minmax(72px, 72px)) !important;
+    width: max-content;
+    min-width: max-content;
     overflow-x: visible;
     background-size: 28px 28px;
     padding: 8px;
@@ -1931,14 +1979,40 @@
     min-height: 44px;
   }
 
-  .wms-floor-plan {
+  .wms-warehouse-map-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
+  }
+
+  .wms-warehouse-map-scroll .wms-floor-plan {
+    display: grid;
+    width: max-content;
+    min-width: max-content;
+    max-width: none;
+    overflow: visible;
     gap: 10px;
     padding: 8px;
     background-size: 24px 24px;
   }
 
-  .wms-floor-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 22px;
+  .wms-warehouse-map-scroll .wms-floor-zone-label,
+  .wms-warehouse-map-scroll .wms-floor-zone {
+    min-width: max-content;
+  }
+
+  .wms-warehouse-map-scroll .wms-floor-zone + .wms-floor-zone {
+    margin-top: 10px;
+  }
+
+  .wms-warehouse-map-scroll .wms-floor-row {
+    grid-template-columns: repeat(var(--wms-rack-pairs), minmax(92px, 92px) minmax(92px, 92px) 28px) !important;
+    width: max-content;
+    min-width: max-content;
     gap: 6px;
   }
 
@@ -2100,7 +2174,8 @@
   }
 
   .wms-content {
-    max-width: 100vw;
+    width: 100%;
+    max-width: 100%;
     padding: 7px 5px;
   }
 
@@ -2132,6 +2207,14 @@
     grid-template-columns: none;
   }
 
+  .wms-warehouse-card .wms-table-wrap {
+    max-width: 100%;
+  }
+
+  .wms-warehouse-map-scroll {
+    max-width: 100%;
+  }
+
   .wms-responsive-table td {
     grid-template-columns: minmax(76px, 36%) minmax(0, 1fr);
     padding: 7px 8px;
@@ -2144,6 +2227,10 @@
   .wms-table:not(.wms-responsive-table),
   .wms-table.compact {
     min-width: 460px;
+  }
+
+  .wms-warehouse-card .wms-table.compact {
+    min-width: 980px;
   }
 
   .wms-rack-row {
