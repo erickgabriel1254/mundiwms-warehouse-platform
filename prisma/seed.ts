@@ -81,7 +81,7 @@ async function main() {
     prisma.user.create({
       data: {
         name: 'Administrador WMS',
-        email: 'admin@mundiwms.local',
+        email: 'admin@demo',
         passwordHash: hashPassword('Admin123!'),
         roleId: adminRole.id,
       },
@@ -89,7 +89,7 @@ async function main() {
     prisma.user.create({
       data: {
         name: 'Despachador',
-        email: 'despachador@mundiwms.local',
+        email: 'despacho@demo',
         passwordHash: hashPassword('Despacho123!'),
         roleId: operatorRole.id,
       },
@@ -97,7 +97,7 @@ async function main() {
     prisma.user.create({
       data: {
         name: 'Supervisor Logistico',
-        email: 'supervisor@mundiwms.local',
+        email: 'supervisor@demo',
         passwordHash: hashPassword('Supervisor123!'),
         roleId: supervisorRole.id,
       },
@@ -466,9 +466,9 @@ async function main() {
 
   console.log('Seed WMS completado');
   console.log('Usuarios iniciales:');
-  console.log('admin@mundiwms.local / Admin123!');
-  console.log('despachador@mundiwms.local / Despacho123!');
-  console.log('supervisor@mundiwms.local / Supervisor123!');
+  console.log('admin@demo / Admin123!');
+  console.log('supervisor@demo / Supervisor123!');
+  console.log('despacho@demo / Despacho123!');
 }
 
 main()

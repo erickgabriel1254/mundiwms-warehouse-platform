@@ -1,5 +1,5 @@
 const API_BASE = process.env.WMS_API_URL ?? 'https://mundiwms-demo.vercel.app';
-const EMAIL = process.env.WMS_ADMIN_EMAIL ?? 'admin@mundiwms.local';
+const EMAIL = process.env.WMS_ADMIN_EMAIL ?? 'admin@demo';
 const PASSWORD = process.env.WMS_ADMIN_PASSWORD ?? 'Admin123!';
 const MARKER = 'CTV-OPS-2026';
 

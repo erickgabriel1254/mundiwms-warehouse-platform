@@ -359,7 +359,7 @@ function AppShell() {
 function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('admin@mundiwms.local');
+  const [email, setEmail] = useState('admin@demo');
   const [password, setPassword] = useState('Admin123!');
   const [busy, setBusy] = useState(false);
   if (user) return <Navigate to="/" replace />;
@@ -401,9 +401,9 @@ function LoginPage() {
             {busy ? 'Validando...' : 'Ingresar'}
           </button>
           <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-            <div>admin@mundiwms.local / Admin123!</div>
-            <div>despachador@mundiwms.local / Despacho123!</div>
-            <div>supervisor@mundiwms.local / Supervisor123!</div>
+            <div>admin@demo / Admin123!</div>
+            <div>supervisor@demo / Supervisor123!</div>
+            <div>despacho@demo / Despacho123!</div>
           </div>
         </div>
       </form>

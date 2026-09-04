@@ -1,5 +1,5 @@
 const API_BASE = process.env.WMS_API_URL ?? 'https://mundiwms-demo.vercel.app';
-const EMAIL = process.env.WMS_ADMIN_EMAIL ?? 'admin@mundiwms.local';
+const EMAIL = process.env.WMS_ADMIN_EMAIL ?? 'admin@demo';
 const PASSWORD = process.env.WMS_ADMIN_PASSWORD ?? 'Admin123!';
 const COMPANY_ID = process.env.WMS_COMPANY_ID ?? 'company_ferremayor';
 const CATALOG_URL = 'https://ferremayor.ec/wp-json/wc/store/v1/products?per_page=100';
