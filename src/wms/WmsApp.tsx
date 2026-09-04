@@ -3761,8 +3761,8 @@ function PackingPage() {
                   <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
                     <FileDown size={16} /> PDF
                   </button>
-                  <button className="wms-button" onClick={() => downloadOutboundLabels(row.original)}>
-                    <Printer size={16} /> Etiquetas
+                  <button className="wms-button" onClick={() => printOutboundLabels(row.original)}>
+                    <Printer size={16} /> Imprimir
                   </button>
                   <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
                     Revisar
@@ -3847,8 +3847,8 @@ function ShippingPage() {
                   <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
                     <FileDown size={16} /> PDF
                   </button>
-                  <button className="wms-button" onClick={() => downloadOutboundLabels(row.original)}>
-                    <Printer size={16} /> Etiquetas
+                  <button className="wms-button" onClick={() => printOutboundLabels(row.original)}>
+                    <Printer size={16} /> Imprimir
                   </button>
                   <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
                     Revisar
@@ -4120,6 +4120,10 @@ function zplSafe(value: string) {
   return value.replace(/[\^~]/g, ' ').slice(0, 42);
 }
 
+function htmlSafe(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char] ?? char);
+}
+
 function generateOutboundZpl(order: OutboundOrder) {
   return order.items
     .map((item, index) => {
@@ -4165,6 +4169,99 @@ function downloadOutboundLabels(order: OutboundOrder) {
   toast.success('Etiquetas ZPL generadas');
 }
 
+function printOutboundLabels(order: OutboundOrder) {
+  const labels = order.items.flatMap((item, index) => {
+    const serials = item.serialNumbers.length ? item.serialNumbers : [`QTY-${item.quantity}`];
+    return serials.map((serial, serialIndex) => ({
+      orderNo: order.orderNo,
+      client: order.client.name,
+      sku: item.product?.sku ?? '-',
+      name: item.product?.name ?? '-',
+      quantity: item.quantity,
+      serial,
+      code: `${order.orderNo}-${item.product?.sku ?? 'SKU'}-${serialIndex + 1}`,
+      index: index + 1,
+      total: order.items.length,
+    }));
+  });
+  const popup = window.open('', '_blank', 'width=480,height=720');
+  if (!popup) {
+    toast.error('El navegador bloqueo la impresion de etiquetas');
+    return;
+  }
+  popup.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>Etiquetas ${htmlSafe(order.orderNo)}</title>
+        <style>
+          @page { size: 100mm 60mm; margin: 0; }
+          * { box-sizing: border-box; }
+          body { margin: 0; font-family: Arial, sans-serif; color: #111827; }
+          .label {
+            width: 100mm;
+            height: 60mm;
+            padding: 6mm;
+            page-break-after: always;
+            display: grid;
+            grid-template-rows: auto auto auto 1fr auto;
+            gap: 2mm;
+            border: 1px solid #e5e7eb;
+          }
+          .top { display: flex; justify-content: space-between; gap: 4mm; align-items: flex-start; }
+          .order { font-size: 18px; font-weight: 800; }
+          .muted { color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+          .line { font-size: 11px; font-weight: 700; }
+          .product { font-size: 13px; font-weight: 800; line-height: 1.15; }
+          .barcode {
+            height: 16mm;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #111827;
+            font-family: "Courier New", monospace;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 1px;
+          }
+          .footer { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; }
+          @media print { .label { border: 0; } }
+        </style>
+      </head>
+      <body>
+        ${labels.map((label) => `
+          <section class="label">
+            <div class="top">
+              <div>
+                <div class="muted">Despacho</div>
+                <div class="order">${htmlSafe(label.orderNo)}</div>
+              </div>
+              <div class="line">${label.index}/${label.total}</div>
+            </div>
+            <div class="line">Cliente: ${htmlSafe(label.client)}</div>
+            <div>
+              <div class="muted">SKU</div>
+              <div class="product">${htmlSafe(label.sku)}</div>
+            </div>
+            <div>
+              <div class="product">${htmlSafe(label.name)}</div>
+              <div class="line">Cantidad: ${label.quantity} | Serie/Lote: ${htmlSafe(label.serial)}</div>
+            </div>
+            <div>
+              <div class="barcode">${htmlSafe(label.code)}</div>
+              <div class="footer"><span>${htmlSafe(order.warehouse.name)}</span><span>${new Date().toLocaleDateString()}</span></div>
+            </div>
+          </section>
+        `).join('')}
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+  popup.print();
+  toast.success('Etiquetas enviadas a impresion');
+}
+
 function OrdersTable({
   type,
   data,
@@ -4203,8 +4300,8 @@ function OrdersTable({
                   <FileDown size={16} /> PDF
                 </button>
                 {type === 'outbound' ? (
-                  <button className="wms-button" onClick={() => downloadOutboundLabels(row.original as OutboundOrder)}>
-                    <Printer size={16} /> Etiquetas
+                  <button className="wms-button" onClick={() => printOutboundLabels(row.original as OutboundOrder)}>
+                    <Printer size={16} /> Imprimir
                   </button>
                 ) : null}
                 {['DRAFT', 'PENDING', 'RESERVED'].includes(row.original.status) ? (
