@@ -76,9 +76,11 @@ async function createLayout(token: string, company: Company, config: LayoutConfi
       for (let level = 1; level <= config.levels; level += 1) {
         for (let position = 1; position <= config.positions; position += 1) {
           const locationCode = code(config.zone, aisle, rack, level, position);
-          const mapX = (aisle - 1) * (config.racks + 1) + rack;
-          const mapY = (level - 1) * (config.positions + 1) + position;
-          const pickSequence = aisle * 10000 + rack * 1000 + level * 100 + position;
+          const pairIndex = Math.floor((rack - 1) / 2);
+          const sideIndex = (rack - 1) % 2;
+          const mapX = pairIndex * 3 + sideIndex;
+          const mapY = aisle - 1;
+          const pickSequence = aisle * 10000 + pairIndex * 1000 + sideIndex * 500 + level * 100 + position;
           const payload = {
             warehouseId: warehouse.id,
             code: locationCode,

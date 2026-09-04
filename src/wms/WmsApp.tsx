@@ -1767,119 +1767,150 @@ function compareLocationLayout(a: Location, b: Location) {
   return [a.zone, a.aisle, a.rack, a.level, a.position, a.name].join('|').localeCompare([b.zone, b.aisle, b.rack, b.level, b.position, b.name].join('|'), 'es', { numeric: true });
 }
 
-function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void }) {
-  const [rackDetail, setRackDetail] = useState<{ aisle: string; rack: string; locations: Location[] } | null>(null);
-  const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
-  const hasBlueprint = warehouseLocations.some((location) => (location.mapX ?? 0) > 0 || (location.mapY ?? 0) > 0 || (location.mapW ?? 1) > 1 || (location.mapH ?? 1) > 1);
-  const aisles = Array.from(new Set(warehouseLocations.map((location) => location.aisle || 'General'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
-  const rackGroups = Array.from(
-    warehouseLocations.reduce((map, location) => {
-      const aisle = location.aisle || 'General';
-      const rack = location.rack || 'Sin rack';
-      const key = `${aisle}|${rack}`;
-      const current = map.get(key) ?? { aisle, rack, locations: [] as Location[] };
-      current.locations.push(location);
+type RackGroup = {
+  aisle: string;
+  rack: string;
+  locations: Location[];
+  mapX: number;
+  mapY: number;
+  route: number;
+  totals: ReturnType<typeof getLocationStats>;
+  levels: number;
+  positions: number;
+};
+
+function parseLayoutNumber(value?: string | null) {
+  const parsed = Number(String(value ?? '').replace(/\D/g, ''));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function rackFloorX(location: Location) {
+  if (typeof location.mapX === 'number' && location.mapX >= 0) return location.mapX;
+  const rackNumber = parseLayoutNumber(location.rack);
+  if (!rackNumber) return 0;
+  const pairIndex = Math.floor((rackNumber - 1) / 2);
+  const sideIndex = (rackNumber - 1) % 2;
+  return pairIndex * 3 + sideIndex;
+}
+
+function rackFloorY(location: Location) {
+  if (typeof location.mapY === 'number' && location.mapY >= 0) return location.mapY;
+  const aisleNumber = parseLayoutNumber(location.aisle);
+  return aisleNumber ? aisleNumber - 1 : 0;
+}
+
+function buildRackGroups(locations: Location[]): RackGroup[] {
+  const grouped = locations.reduce((map, location) => {
+    const aisle = location.aisle || 'General';
+    const rack = location.rack || 'Sin rack';
+    const key = `${aisle}|${rack}`;
+    const current = map.get(key) ?? { aisle, rack, locations: [] as Location[] };
+    current.locations.push(location);
+    map.set(key, current);
+    return map;
+  }, new Map<string, { aisle: string; rack: string; locations: Location[] }>());
+
+  return Array.from(grouped.values())
+    .map((group) => {
+      const orderedLocations = group.locations.sort(compareLocationLayout);
+      const totals = orderedLocations.reduce(
+        (acc, location) => {
+          const stats = getLocationStats(location);
+          acc.total += stats.total;
+          acc.available += stats.available;
+          acc.reserved += stats.reserved;
+          acc.products += stats.products;
+          return acc;
+        },
+        { total: 0, available: 0, reserved: 0, products: 0 },
+      );
+      const levels = new Set(orderedLocations.map((location) => location.level).filter(Boolean)).size;
+      const positions = new Set(orderedLocations.map((location) => location.position).filter(Boolean)).size;
+      return {
+        ...group,
+        locations: orderedLocations,
+        mapX: Math.min(...orderedLocations.map(rackFloorX)),
+        mapY: Math.min(...orderedLocations.map(rackFloorY)),
+        route: Math.min(...orderedLocations.map((location) => location.pickSequence || Number.MAX_SAFE_INTEGER)),
+        totals,
+        levels,
+        positions,
+      };
+    })
+    .sort((a, b) => (a.mapY - b.mapY) || (a.mapX - b.mapX) || `${a.aisle}|${a.rack}`.localeCompare(`${b.aisle}|${b.rack}`, 'es', { numeric: true }));
+}
+
+function WarehouseFloorPlan({ rackGroups, onSelectRack }: { rackGroups: RackGroup[]; onSelectRack: (rack: RackGroup) => void }) {
+  const aisles = Array.from(
+    rackGroups.reduce((map, rack) => {
+      const key = rack.aisle || 'General';
+      const current = map.get(key) ?? [] as RackGroup[];
+      current.push(rack);
       map.set(key, current);
       return map;
-    }, new Map<string, { aisle: string; rack: string; locations: Location[] }>()),
+    }, new Map<string, RackGroup[]>()),
   )
-    .map(([, value]) => ({ ...value, locations: value.locations.sort(compareLocationLayout) }))
-    .sort((a, b) => `${a.aisle}|${a.rack}`.localeCompare(`${b.aisle}|${b.rack}`, 'es', { numeric: true }));
+    .map(([aisle, racks]) => ({ aisle, racks: racks.sort((a, b) => a.mapX - b.mapX || a.rack.localeCompare(b.rack, 'es', { numeric: true })) }))
+    .sort((a, b) => a.aisle.localeCompare(b.aisle, 'es', { numeric: true }));
+  const maxPairCount = Math.max(1, ...aisles.map((aisle) => Math.ceil(aisle.racks.length / 2)));
+
+  return (
+    <div className="wms-floor-plan">
+      <div className="wms-floor-zone-label">Vista superior de bodega</div>
+      {aisles.map(({ aisle, racks }) => {
+        const pairs = Array.from({ length: maxPairCount }, (_, pairIndex) => racks.slice(pairIndex * 2, pairIndex * 2 + 2));
+        return (
+          <section className="wms-floor-zone" key={aisle} style={{ ['--wms-rack-pairs' as string]: maxPairCount }}>
+            <div className="wms-floor-zone-title">Pasillo {aisle}</div>
+            <div className="wms-floor-row">
+              {pairs.flatMap((pair, pairIndex) => {
+                const first = pair[0];
+                const second = pair[1];
+                return [
+                  first ? <RackTopButton key={`${aisle}-${first.rack}`} rack={first} onSelectRack={onSelectRack} /> : <div className="wms-floor-empty" key={`${aisle}-${pairIndex}-empty-a`} />,
+                  second ? <RackTopButton key={`${aisle}-${second.rack}`} rack={second} onSelectRack={onSelectRack} /> : <div className="wms-floor-empty" key={`${aisle}-${pairIndex}-empty-b`} />,
+                  <div className="wms-floor-access" key={`${aisle}-${pairIndex}-access`}>Acceso</div>,
+                ];
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function RackTopButton({ rack, onSelectRack }: { rack: RackGroup; onSelectRack: (rack: RackGroup) => void }) {
+  const state = rack.totals.total === 0 ? 'empty' : rack.totals.reserved > 0 ? 'reserved' : 'filled';
+  return (
+    <button className={`wms-floor-rack ${state}`} onClick={() => onSelectRack(rack)} title={`Abrir niveles del Rack ${rack.rack}`}>
+      <strong>Rack {rack.rack}</strong>
+      <span>{rack.locations.length} ubicaciones</span>
+      <small>{rack.levels || 1} niveles / {rack.positions || rack.locations.length} posiciones</small>
+      <b>{rack.totals.total} unid.</b>
+    </button>
+  );
+}
+
+function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void }) {
+  const [rackDetail, setRackDetail] = useState<RackGroup | null>(null);
+  const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
+  const rackGroups = buildRackGroups(warehouseLocations);
   if (!warehouseLocations.length) {
     return <div className="wms-empty-map">Sin ubicaciones creadas para esta bodega.</div>;
   }
 
-  if (hasBlueprint) {
-    const cols = Math.max(8, ...warehouseLocations.map((location) => (location.mapX ?? 0) + (location.mapW ?? 1)));
-    const rows = Math.max(6, ...warehouseLocations.map((location) => (location.mapY ?? 0) + (location.mapH ?? 1)));
-    return (
-      <>
-        <div
-          className="wms-location-blueprint"
-          style={{
-            gridTemplateColumns: `34px repeat(${cols}, minmax(42px, 1fr))`,
-            gridTemplateRows: `28px repeat(${rows}, 42px)`,
-          }}
-        >
-          <div className="wms-blueprint-axis corner" />
-          {Array.from({ length: cols }, (_, index) => (
-            <div className="wms-blueprint-axis" key={`col-${index}`}>C{index + 1}</div>
-          ))}
-          {Array.from({ length: rows }, (_, index) => (
-            <div className="wms-blueprint-axis row" key={`row-${index}`} style={{ gridColumn: 1, gridRow: index + 2 }}>F{index + 1}</div>
-          ))}
-          {warehouseLocations.map((location) => {
-            const stats = getLocationStats(location);
-            const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
-            return (
-              <button
-                className={`wms-blueprint-slot ${state}`}
-                key={location.id}
-                onClick={() => onEdit(location)}
-                title={`${location.name} - ${stats.total} unidades`}
-                style={{
-                  gridColumn: `${(location.mapX ?? 0) + 2} / span ${Math.min(location.mapW ?? 1, 2)}`,
-                  gridRow: `${(location.mapY ?? 0) + 2} / span ${Math.min(location.mapH ?? 1, 2)}`,
-                }}
-              >
-                <span>{location.code}</span>
-                <strong>{stats.total}</strong>
-                <small>Ruta {location.pickSequence || '-'}</small>
-              </button>
-            );
-          })}
-        </div>
-        <div className="wms-rack-summary">
-          {rackGroups.map((group) => {
-            const total = group.locations.reduce((sum, location) => sum + getLocationStats(location).total, 0);
-            return (
-              <button className="wms-rack-summary-item" key={`${group.aisle}-${group.rack}`} onClick={() => setRackDetail(group)}>
-                <strong>Rack {group.rack}</strong>
-                <span>Pasillo {group.aisle}</span>
-                <small>{total} unidades / {group.locations.length} posiciones</small>
-              </button>
-            );
-          })}
-        </div>
-        {rackDetail ? <RackFrontModal rack={rackDetail} onClose={() => setRackDetail(null)} onEdit={onEdit} /> : null}
-      </>
-    );
-  }
-
   return (
     <>
-      <div className="wms-location-map">
-        {aisles.map((aisle) => {
-          const aisleLocations = warehouseLocations.filter((location) => (location.aisle || 'General') === aisle);
-          const racks = Array.from(new Set(aisleLocations.map((location) => location.rack || 'Sin rack'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
-          return (
-            <section className="wms-aisle" key={aisle}>
-              <div className="wms-aisle-title">Pasillo {aisle}</div>
-              <div className="wms-rack-row">
-                {racks.map((rack) => {
-                  const rackLocations = aisleLocations.filter((location) => (location.rack || 'Sin rack') === rack).sort(compareLocationLayout);
-                  return (
-                    <div className="wms-rack" key={`${aisle}-${rack}`}>
-                      <button className="wms-rack-title clickable" onClick={() => setRackDetail({ aisle, rack, locations: rackLocations })}>Rack {rack}</button>
-                      <div className="wms-slot-grid">
-                        {rackLocations.map((location) => {
-                          const stats = getLocationStats(location);
-                          const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
-                          return (
-                            <button className={`wms-slot ${state}`} key={location.id} onClick={() => onEdit(location)} title={`${location.name} - ${stats.total} unidades`}>
-                              <span>{location.level || 'N'}-{location.position || 'P'}</span>
-                              <strong>{stats.total}</strong>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+      <WarehouseFloorPlan rackGroups={rackGroups} onSelectRack={setRackDetail} />
+      <div className="wms-rack-summary">
+        {rackGroups.map((group) => (
+          <button className="wms-rack-summary-item" key={`${group.aisle}-${group.rack}`} onClick={() => setRackDetail(group)}>
+            <strong>Rack {group.rack}</strong>
+            <span>Pasillo {group.aisle}</span>
+            <small>{group.totals.total} unidades / {group.locations.length} ubicaciones</small>
+          </button>
+        ))}
       </div>
       {rackDetail ? <RackFrontModal rack={rackDetail} onClose={() => setRackDetail(null)} onEdit={onEdit} /> : null}
     </>
@@ -1939,25 +1970,26 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
   const [position, setPosition] = useState(location?.position ?? '');
   const [mapX, setMapX] = useState(Math.max(0, location?.mapX ?? 0));
   const [mapY, setMapY] = useState(Math.max(0, location?.mapY ?? 0));
-  const [mapW, setMapW] = useState(Math.min(2, Math.max(1, location?.mapW ?? 1)));
-  const [mapH, setMapH] = useState(Math.min(2, Math.max(1, location?.mapH ?? 1)));
   const [pickSequence, setPickSequence] = useState(location?.pickSequence ?? 0);
   const [kind, setKind] = useState(location?.kind ?? 'STORAGE');
   const selectedWarehouseLocations = catalogs.locations.filter((item) => item.warehouseId === warehouseId && item.id !== location?.id);
-  const mapPreviewCols = Math.max(8, mapX + mapW, ...selectedWarehouseLocations.map((item) => (item.mapX ?? 0) + Math.min(item.mapW ?? 1, 2)));
-  const mapPreviewRows = Math.max(6, mapY + mapH, ...selectedWarehouseLocations.map((item) => (item.mapY ?? 0) + Math.min(item.mapH ?? 1, 2)));
-  const setSafeMapW = (value: number) => setMapW(Math.min(2, Math.max(1, value || 1)));
-  const setSafeMapH = (value: number) => setMapH(Math.min(2, Math.max(1, value || 1)));
+  const builderRackGroups = buildRackGroups(selectedWarehouseLocations);
+  const mapPreviewCols = Math.max(6, mapX + 1, ...builderRackGroups.map((item) => item.mapX + 1));
+  const mapPreviewRows = Math.max(4, mapY + 1, ...builderRackGroups.map((item) => item.mapY + 1));
   const updateMapPosition = (x: number, y: number) => {
     setMapX(Math.max(0, x));
     setMapY(Math.max(0, y));
-    setPickSequence((y + 1) * 100 + (x + 1));
+    setPickSequence((y + 1) * 1000 + (x + 1) * 100);
   };
   const generatedCode = locationLayoutCode({ zone, aisle, rack, level, position, code });
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if ((mapX + 1) % 3 === 0) {
+      toast.error('Esa columna esta reservada como acceso. Selecciona una columna de rack.');
+      return;
+    }
     try {
-      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, mapX, mapY, mapW: Math.min(mapW, 2), mapH: Math.min(mapH, 2), pickSequence, kind }, location?.id);
+      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, mapX, mapY, mapW: 1, mapH: 1, pickSequence, kind }, location?.id);
       toast.success(location ? 'Ubicacion actualizada' : 'Ubicacion creada');
       onSaved();
     } catch (error) {
@@ -2020,7 +2052,7 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
         </label>
         <div className="col-span-full rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-slate-800">
-            <MapPinned size={16} /> Plano y ruta de picking
+            <MapPinned size={16} /> Plano superior y ruta de picking
           </div>
           <div className="wms-grid cols-4">
             <label className="wms-label">
@@ -2031,26 +2063,19 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
               Fila Y
               <input className="wms-input" type="number" min={0} value={mapY} onChange={(event) => setMapY(Math.max(0, Number(event.target.value)))} />
             </label>
-            <label className="wms-label">
-              Ancho
-              <input className="wms-input" type="number" min={1} max={2} value={mapW} onChange={(event) => setSafeMapW(Number(event.target.value))} />
-            </label>
-            <label className="wms-label">
-              Alto
-              <input className="wms-input" type="number" min={1} max={2} value={mapH} onChange={(event) => setSafeMapH(Number(event.target.value))} />
-            </label>
             <label className="wms-label col-span-full">
               Orden de picking
               <input className="wms-input" type="number" min={0} value={pickSequence} onChange={(event) => setPickSequence(Number(event.target.value))} />
             </label>
           </div>
+          <p className="mt-2 text-xs font-bold text-slate-500">
+            Cada cuadro representa un rack visto desde arriba. Despues de dos racks juntos queda una columna de acceso para poder recoger material.
+          </p>
           <div className="wms-location-builder">
             <div className="wms-location-builder-toolbar">
-              <strong>Vista de creacion</strong>
+              <strong>Crear en plano</strong>
               <div className="wms-actions">
-                <button type="button" className="wms-button" onClick={() => setSafeMapW(mapW === 1 ? 2 : 1)}>Ancho {mapW}</button>
-                <button type="button" className="wms-button" onClick={() => setSafeMapH(mapH === 1 ? 2 : 1)}>Alto {mapH}</button>
-                <button type="button" className="wms-button" onClick={() => setPickSequence((mapY + 1) * 100 + (mapX + 1))}>Calcular ruta</button>
+                <button type="button" className="wms-button" onClick={() => setPickSequence((mapY + 1) * 1000 + (mapX + 1) * 100)}>Calcular ruta</button>
               </div>
             </div>
             <div
@@ -2067,38 +2092,43 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
               {Array.from({ length: mapPreviewRows }, (_, index) => (
                 <div className="wms-builder-axis row" key={`builder-row-${index}`} style={{ gridColumn: 1, gridRow: index + 2 }}>F{index + 1}</div>
               ))}
-              {selectedWarehouseLocations.map((item) => (
+              {builderRackGroups.map((item) => (
                 <div
                   className="wms-builder-existing"
-                  key={item.id}
-                  title={item.name}
+                  key={`${item.aisle}-${item.rack}`}
+                  title={`Rack ${item.rack} / Pasillo ${item.aisle}`}
                   style={{
-                    gridColumn: `${(item.mapX ?? 0) + 2} / span ${Math.min(item.mapW ?? 1, 2)}`,
-                    gridRow: `${(item.mapY ?? 0) + 2} / span ${Math.min(item.mapH ?? 1, 2)}`,
+                    gridColumn: item.mapX + 2,
+                    gridRow: item.mapY + 2,
                   }}
                 >
-                  {item.code}
+                  R{item.rack}
+                  <small>{item.locations.length}</small>
                 </div>
               ))}
               {Array.from({ length: mapPreviewRows }, (_, y) =>
-                Array.from({ length: mapPreviewCols }, (_, x) => (
-                  <button
-                    type="button"
-                    className="wms-builder-cell"
-                    key={`cell-${x}-${y}`}
-                    onClick={() => updateMapPosition(x, y)}
-                    style={{ gridColumn: x + 2, gridRow: y + 2 }}
-                    title={`Fila ${y + 1}, Columna ${x + 1}`}
-                  >
-                    {x + 1}.{y + 1}
-                  </button>
-                )),
+                Array.from({ length: mapPreviewCols }, (_, x) => {
+                  const isAccessColumn = (x + 1) % 3 === 0;
+                  return (
+                    <button
+                      type="button"
+                      className={`wms-builder-cell ${isAccessColumn ? 'access' : ''}`}
+                      disabled={isAccessColumn}
+                      key={`cell-${x}-${y}`}
+                      onClick={() => updateMapPosition(x, y)}
+                      style={{ gridColumn: x + 2, gridRow: y + 2 }}
+                      title={isAccessColumn ? `Acceso en columna ${x + 1}` : `Fila ${y + 1}, Columna ${x + 1}`}
+                    >
+                      {isAccessColumn ? 'Acceso' : `C${x + 1}/F${y + 1}`}
+                    </button>
+                  );
+                }),
               )}
               <div
                 className="wms-builder-selected"
                 style={{
-                  gridColumn: `${mapX + 2} / span ${Math.min(mapW, 2)}`,
-                  gridRow: `${mapY + 2} / span ${Math.min(mapH, 2)}`,
+                  gridColumn: mapX + 2,
+                  gridRow: mapY + 2,
                 }}
               >
                 {code || generatedCode || 'Nueva'}
@@ -2178,8 +2208,8 @@ function WarehousesPage() {
                 </div>
                 <div className="wms-map-header">
                   <div>
-                    <h4 className="font-extrabold">Mapa de racks y posiciones</h4>
-                    <p className="text-xs text-slate-500">Clic en una posicion para editar su estructura.</p>
+                    <h4 className="font-extrabold">Mapa de racks y accesos</h4>
+                    <p className="text-xs text-slate-500">Clic en un rack para ver niveles, posiciones y contenido.</p>
                   </div>
                   <button className="wms-button" onClick={() => setEditingLocation({ location: null, warehouseId: warehouse.id })}>
                     Nueva ubicacion
@@ -2204,7 +2234,7 @@ function WarehousesPage() {
                           <th>Rack</th>
                           <th>Nivel</th>
                           <th>Posicion</th>
-                          <th>Plano</th>
+                          <th>Plano superior</th>
                           <th>Ruta</th>
                           <th>Stock</th>
                           <th>Acciones</th>
@@ -2225,7 +2255,7 @@ function WarehousesPage() {
                               <td>{location.rack || '-'}</td>
                               <td>{location.level || '-'}</td>
                               <td>{location.position || '-'}</td>
-                              <td>{`${location.mapX ?? 0},${location.mapY ?? 0} / ${location.mapW ?? 1}x${location.mapH ?? 1}`}</td>
+                              <td>{`C${(location.mapX ?? 0) + 1} / F${(location.mapY ?? 0) + 1}`}</td>
                               <td>{location.pickSequence || '-'}</td>
                               <td>{stats.total ? `${stats.total} unid.` : <span className="text-emerald-700 font-bold">Libre</span>}</td>
                               <td>

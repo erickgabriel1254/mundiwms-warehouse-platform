@@ -58,8 +58,8 @@ const locationSchema = z.object({
   position: z.string().trim().max(24).optional().default(''),
   mapX: z.coerce.number().int().min(0).default(0),
   mapY: z.coerce.number().int().min(0).default(0),
-  mapW: z.coerce.number().int().min(1).max(2).default(1),
-  mapH: z.coerce.number().int().min(1).max(2).default(1),
+  mapW: z.coerce.number().int().min(1).max(1).default(1),
+  mapH: z.coerce.number().int().min(1).max(1).default(1),
   pickSequence: z.coerce.number().int().min(0).default(0),
   kind: z.enum(['STORAGE', 'RECEIVING', 'DISPATCH', 'BLOCKED']).default('STORAGE'),
 });
