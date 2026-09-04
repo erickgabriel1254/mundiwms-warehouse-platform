@@ -64,7 +64,7 @@ function isBranch(company: Company) {
 }
 
 function isTargetCompany(company: Company) {
-  return ['FERREMAYOR', 'FERRILOPEZ', 'CARVATEL', 'CARVATEL-SUC', 'CARVATEL-MATRIZ', 'CARVATEL-TIENDA'].includes(company.code);
+  return ['CARVATEL', 'CARVATEL-SUC', 'CARVATEL-MATRIZ', 'CARVATEL-TIENDA'].includes(company.code);
 }
 
 function clean(value: string) {
@@ -498,15 +498,21 @@ async function main() {
   if (!companies.length) throw new Error('No se encontraron empresas Carvatel para cargar operaciones');
 
   const firstCatalogs = await refreshCatalogs(token, companies);
-  const baselineUpdated = await tuneStockMinimums(token, companies, firstCatalogs);
+  const runnable = companies
+    .map((company, index) => ({ company, catalogs: firstCatalogs[index] }))
+    .filter((entry): entry is { company: Company; catalogs: Catalogs } => (entry.catalogs?.warehouses.length ?? 0) > 0);
+  if (!runnable.length) throw new Error('No se encontraron empresas Carvatel con bodegas configuradas');
+  const runnableCompanies = runnable.map((entry) => entry.company);
+  const runnableCatalogs = runnable.map((entry) => entry.catalogs);
+  const baselineUpdated = await tuneStockMinimums(token, runnableCompanies, runnableCatalogs);
   const companyResults: string[] = [];
-  for (const company of companies) {
+  for (const company of runnableCompanies) {
     companyResults.push(await seedCompany(token, company));
   }
-  const finalCatalogs = await refreshCatalogs(token, companies);
-  const finalUpdated = await tuneStockMinimums(token, companies, finalCatalogs);
+  const finalCatalogs = await refreshCatalogs(token, runnableCompanies);
+  const finalUpdated = await tuneStockMinimums(token, runnableCompanies, finalCatalogs);
 
-  console.log(`Empresas procesadas: ${companies.map((company) => company.code).join(', ')}`);
+  console.log(`Empresas procesadas: ${runnableCompanies.map((company) => company.code).join(', ')}`);
   console.log(`Minimos ajustados: ${baselineUpdated + finalUpdated}`);
   console.log(companyResults.join('\n'));
 }

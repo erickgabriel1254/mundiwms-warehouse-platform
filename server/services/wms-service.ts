@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { createToken, hashPassword, verifyPassword } from '../auth.js';
 import { prisma } from '../prisma.js';
 
+const TX_OPTIONS = { maxWait: 20000, timeout: 120000 };
+
 const productSchema = z.object({
   sku: z.string().min(2).max(40),
   barcode: z.string().optional(),
@@ -166,8 +168,10 @@ function cleanLot(value?: string | null) {
   return value?.trim().toUpperCase() || null;
 }
 
-function parseOptionalDate(value?: string | null) {
-  if (!value?.trim()) return null;
+function parseOptionalDate(value?: string | Date | null) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (!value.trim()) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error('Fecha de vencimiento invalida');
   return date;
@@ -232,15 +236,15 @@ async function rebuildBalances(db: Db) {
     _count: { _all: true },
   });
   await db.inventoryBalance.deleteMany();
-  for (const group of groups) {
-    await db.inventoryBalance.create({
-      data: {
+  if (groups.length) {
+    await db.inventoryBalance.createMany({
+      data: groups.map((group) => ({
         productId: group.productId,
         warehouseId: group.warehouseId,
         locationId: group.locationId,
         status: group.status,
         quantity: group._count._all,
-      },
+      })),
     });
   }
 }
@@ -817,26 +821,25 @@ export async function confirmInbound(id: string, userId: string, companyId: stri
         if (existing) throw new Error(`Una o mas series de ${item.product.sku} ya existen`);
       }
 
-      const createdUnits = [];
-      const loops = item.product.managesSerial ? serials.length : item.quantity;
       const targetLocation = await resolveProductLocation(tx, item.productId, order.warehouseId, item.locationId || order.locationId);
-      for (let index = 0; index < loops; index += 1) {
-        createdUnits.push(
-          await tx.inventoryUnit.create({
-            data: {
-              productId: item.productId,
-              serialNumber: item.product.managesSerial ? serials[index] : null,
-              lotNumber: cleanLot(item.lotNumber),
-              expirationDate: parseOptionalDate(item.expirationDate),
-              warehouseId: targetLocation.warehouseId,
-              locationId: targetLocation.id,
-              status: 'AVAILABLE',
-            },
-          }),
-        );
-      }
 
       if (item.product.managesSerial) {
+        const createdUnits = [];
+        for (let index = 0; index < serials.length; index += 1) {
+          createdUnits.push(
+            await tx.inventoryUnit.create({
+              data: {
+                productId: item.productId,
+                serialNumber: serials[index],
+                lotNumber: cleanLot(item.lotNumber),
+                expirationDate: parseOptionalDate(item.expirationDate),
+                warehouseId: targetLocation.warehouseId,
+                locationId: targetLocation.id,
+                status: 'AVAILABLE',
+              },
+            }),
+          );
+        }
         for (const unit of createdUnits) {
           await tx.kardexMovement.create({
             data: {
@@ -854,6 +857,17 @@ export async function confirmInbound(id: string, userId: string, companyId: stri
           });
         }
       } else {
+        await tx.inventoryUnit.createMany({
+          data: Array.from({ length: item.quantity }, () => ({
+            productId: item.productId,
+            serialNumber: null,
+            lotNumber: cleanLot(item.lotNumber),
+            expirationDate: parseOptionalDate(item.expirationDate),
+            warehouseId: targetLocation.warehouseId,
+            locationId: targetLocation.id,
+            status: 'AVAILABLE',
+          })),
+        });
         await tx.kardexMovement.create({
           data: {
             type: 'INBOUND',
@@ -892,7 +906,7 @@ export async function confirmInbound(id: string, userId: string, companyId: stri
     await tx.inboundOrder.update({ where: { id }, data: { status: 'RECEIVED', confirmedAt: new Date() } });
     await rebuildBalances(tx);
     return { ok: true };
-  }, { timeout: 30000 });
+  }, TX_OPTIONS);
   await auditLog({
     companyId,
     userId,
@@ -991,7 +1005,7 @@ export async function saveOutbound(body: unknown, userId: string, companyId: str
         },
       });
       await rebuildBalances(tx);
-    });
+    }, TX_OPTIONS);
     if (data.status === 'DRAFT') await reserveOutbound(id, userId, companyId);
     if (data.status === 'DISPATCHED') await dispatchOutbound(id, userId, companyId);
     return prisma.outboundOrder.findUniqueOrThrow({
@@ -1086,7 +1100,7 @@ export async function reserveOutbound(id: string, userId: string, companyId: str
     await tx.outboundOrder.update({ where: { id }, data: { status: 'RESERVED' } });
     await rebuildBalances(tx);
     return { ok: true };
-  });
+  }, TX_OPTIONS);
   await auditLog({ companyId, userId, action: 'RESERVE', entity: 'OutboundOrder', entityId: id, summary: 'Stock reservado para despacho' });
   return result;
 }
@@ -1154,7 +1168,7 @@ export async function dispatchOutbound(id: string, userId: string, companyId: st
     await tx.outboundOrder.update({ where: { id }, data: { status: 'DISPATCHED', confirmedAt: new Date() } });
     await rebuildBalances(tx);
     return { ok: true };
-  });
+  }, TX_OPTIONS);
   await auditLog({ companyId, userId, action: 'DISPATCH', entity: 'OutboundOrder', entityId: id, summary: 'Despacho confirmado' });
   return result;
 }
@@ -1190,7 +1204,7 @@ export async function shipOutbound(id: string, userId: string, companyId: string
     await tx.outboundOrder.update({ where: { id }, data: { status: 'SHIPPED' } });
     await rebuildBalances(tx);
     return { ok: true };
-  });
+  }, TX_OPTIONS);
   await auditLog({ companyId, userId, action: 'SHIP', entity: 'OutboundOrder', entityId: id, summary: 'Envio final confirmado' });
   return result;
 }
@@ -1214,7 +1228,7 @@ export async function cancelOutbound(id: string, companyId: string, userId?: str
       await rebuildBalances(tx);
     }
     return tx.outboundOrder.update({ where: { id }, data: { status: 'CANCELLED' } });
-  });
+  }, TX_OPTIONS);
   await auditLog({ companyId, userId, action: 'CANCEL', entity: 'OutboundOrder', entityId: id, summary: 'Despacho cancelado o liberado' });
   return result;
 }
@@ -1520,7 +1534,7 @@ export async function createAdjustment(body: unknown, userId: string, companyId:
     }
     await rebuildBalances(tx);
     return { ok: true };
-  });
+  }, TX_OPTIONS);
   await auditLog({ companyId, userId, action: data.type, entity: 'InventoryAdjustment', entityId: data.productId, summary: data.reason, metadata: { quantity: data.quantity } });
   return result;
 }
@@ -1601,7 +1615,6 @@ export async function saveLocation(body: unknown, companyId: string, id?: string
   const warehouse = await prisma.warehouse.findFirst({ where: { id: data.warehouseId, companyId } });
   if (!warehouse) throw new Error('Bodega no corresponde a la empresa seleccionada');
   const payload = {
-    warehouseId: data.warehouseId,
     code: data.code.trim().toUpperCase(),
     name: data.name.trim(),
     zone: data.zone.trim(),
@@ -1618,11 +1631,15 @@ export async function saveLocation(body: unknown, companyId: string, id?: string
   };
   const result = id ? await prisma.location.update({
     where: { id },
-    data: payload,
+    data: {
+      ...payload,
+      warehouse: { connect: { id: data.warehouseId } },
+    },
     include: { warehouse: true },
   }) : await prisma.location.create({
     data: {
       ...payload,
+      warehouse: { connect: { id: data.warehouseId } },
     },
     include: { warehouse: true },
   });
