@@ -19,8 +19,11 @@ import {
   FileDown,
   Home,
   Menu,
+  MapPinned,
   PackagePlus,
   PackageSearch,
+  Printer,
+  Route as RouteIcon,
   Save,
   Send,
   Settings2,
@@ -53,8 +56,10 @@ import type {
   Location,
   OrderItem,
   OutboundOrder,
+  PickingPlan,
   Product,
   ProductCategory,
+  ReportAnalytics,
   Role,
   UserSession,
   Warehouse as WarehouseType,
@@ -226,6 +231,7 @@ function AppShell() {
     ['/inventario', 'Inventario', Boxes],
     ['/bodegas', 'Bodegas', Warehouse],
     ['/conteo-ciclico', 'Conteo ciclico', ClipboardList],
+    ['/picking', 'Picking guiado', RouteIcon],
     ['/pedidos', 'Generar pedido', ClipboardList],
     ['/recepcion', 'Recepcion', PackagePlus],
     ['/despacho', 'Despacho', Truck],
@@ -325,6 +331,7 @@ function AppShell() {
               <Route path="/inventario" element={<InventoryPage />} />
               <Route path="/bodegas" element={<WarehousesPage />} />
               <Route path="/conteo-ciclico" element={<CycleCountPage />} />
+              <Route path="/picking" element={<PickingPage />} />
               <Route path="/pedidos" element={<ImportOrdersPage />} />
               <Route path="/recepcion" element={<InboundPage />} />
               <Route path="/despacho" element={<OutboundPage />} />
@@ -1729,9 +1736,45 @@ function compareLocationLayout(a: Location, b: Location) {
 
 function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void }) {
   const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
+  const hasBlueprint = warehouseLocations.some((location) => (location.mapX ?? 0) > 0 || (location.mapY ?? 0) > 0 || (location.mapW ?? 1) > 1 || (location.mapH ?? 1) > 1);
   const aisles = Array.from(new Set(warehouseLocations.map((location) => location.aisle || 'General'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
   if (!warehouseLocations.length) {
     return <div className="wms-empty-map">Sin ubicaciones creadas para esta bodega.</div>;
+  }
+
+  if (hasBlueprint) {
+    const cols = Math.max(8, ...warehouseLocations.map((location) => (location.mapX ?? 0) + (location.mapW ?? 1) + 1));
+    const rows = Math.max(6, ...warehouseLocations.map((location) => (location.mapY ?? 0) + (location.mapH ?? 1) + 1));
+    return (
+      <div
+        className="wms-location-blueprint"
+        style={{
+          gridTemplateColumns: `repeat(${cols}, minmax(36px, 1fr))`,
+          gridTemplateRows: `repeat(${rows}, 42px)`,
+        }}
+      >
+        {warehouseLocations.map((location) => {
+          const stats = getLocationStats(location);
+          const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
+          return (
+            <button
+              className={`wms-blueprint-slot ${state}`}
+              key={location.id}
+              onClick={() => onEdit(location)}
+              title={`${location.name} - ${stats.total} unidades`}
+              style={{
+                gridColumn: `${(location.mapX ?? 0) + 1} / span ${location.mapW ?? 1}`,
+                gridRow: `${(location.mapY ?? 0) + 1} / span ${location.mapH ?? 1}`,
+              }}
+            >
+              <span>{location.code}</span>
+              <strong>{stats.total}</strong>
+              <small>Ruta {location.pickSequence || '-'}</small>
+            </button>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -1780,12 +1823,17 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
   const [rack, setRack] = useState(location?.rack ?? '');
   const [level, setLevel] = useState(location?.level ?? '');
   const [position, setPosition] = useState(location?.position ?? '');
+  const [mapX, setMapX] = useState(location?.mapX ?? 0);
+  const [mapY, setMapY] = useState(location?.mapY ?? 0);
+  const [mapW, setMapW] = useState(location?.mapW ?? 1);
+  const [mapH, setMapH] = useState(location?.mapH ?? 1);
+  const [pickSequence, setPickSequence] = useState(location?.pickSequence ?? 0);
   const [kind, setKind] = useState(location?.kind ?? 'STORAGE');
   const generatedCode = locationLayoutCode({ zone, aisle, rack, level, position, code });
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, kind }, location?.id);
+      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, mapX, mapY, mapW, mapH, pickSequence, kind }, location?.id);
       toast.success(location ? 'Ubicacion actualizada' : 'Ubicacion creada');
       onSaved();
     } catch (error) {
@@ -1846,6 +1894,33 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
           Posicion
           <input className="wms-input" value={position} onChange={(event) => setPosition(event.target.value)} placeholder="08" />
         </label>
+        <div className="col-span-full rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-slate-800">
+            <MapPinned size={16} /> Plano y ruta de picking
+          </div>
+          <div className="wms-grid cols-4">
+            <label className="wms-label">
+              Columna X
+              <input className="wms-input" type="number" min={0} value={mapX} onChange={(event) => setMapX(Number(event.target.value))} />
+            </label>
+            <label className="wms-label">
+              Fila Y
+              <input className="wms-input" type="number" min={0} value={mapY} onChange={(event) => setMapY(Number(event.target.value))} />
+            </label>
+            <label className="wms-label">
+              Ancho
+              <input className="wms-input" type="number" min={1} max={6} value={mapW} onChange={(event) => setMapW(Number(event.target.value))} />
+            </label>
+            <label className="wms-label">
+              Alto
+              <input className="wms-input" type="number" min={1} max={6} value={mapH} onChange={(event) => setMapH(Number(event.target.value))} />
+            </label>
+            <label className="wms-label col-span-full">
+              Orden de picking
+              <input className="wms-input" type="number" min={0} value={pickSequence} onChange={(event) => setPickSequence(Number(event.target.value))} />
+            </label>
+          </div>
+        </div>
         <div className="col-span-full flex justify-end gap-2">
           <button type="button" className="wms-button" onClick={onClose}>Cancelar</button>
           <button className="wms-button primary">Guardar ubicacion</button>
@@ -1944,6 +2019,8 @@ function WarehousesPage() {
                           <th>Rack</th>
                           <th>Nivel</th>
                           <th>Posicion</th>
+                          <th>Plano</th>
+                          <th>Ruta</th>
                           <th>Stock</th>
                           <th>Acciones</th>
                         </tr>
@@ -1963,6 +2040,8 @@ function WarehousesPage() {
                               <td>{location.rack || '-'}</td>
                               <td>{location.level || '-'}</td>
                               <td>{location.position || '-'}</td>
+                              <td>{`${location.mapX ?? 0},${location.mapY ?? 0} / ${location.mapW ?? 1}x${location.mapH ?? 1}`}</td>
+                              <td>{location.pickSequence || '-'}</td>
                               <td>{stats.total ? `${stats.total} unid.` : <span className="text-emerald-700 font-bold">Libre</span>}</td>
                               <td>
                                 <div className="wms-actions">
@@ -1975,7 +2054,7 @@ function WarehousesPage() {
                         })}
                         {!warehouseLocations.length ? (
                           <tr>
-                            <td colSpan={9} className="text-center text-slate-500">Sin ubicaciones en esta bodega.</td>
+                            <td colSpan={11} className="text-center text-slate-500">Sin ubicaciones en esta bodega.</td>
                           </tr>
                         ) : null}
                       </tbody>
@@ -2260,6 +2339,10 @@ function getAvailableInWarehouse(catalogs: Catalogs, productId: string, warehous
     .reduce((sum, balance) => sum + balance.quantity, 0) ?? 0;
 }
 
+function formatDateOnly(value?: string | null) {
+  return value ? new Date(value).toLocaleDateString() : '-';
+}
+
 type OrderPayload = {
   supplierId?: string;
   clientId?: string;
@@ -2311,6 +2394,8 @@ function OrderReview({
               <th>Cantidad</th>
               {mode === 'inbound' ? <th>Costo unit.</th> : null}
               {mode === 'inbound' ? <th>Total</th> : null}
+              {mode === 'inbound' ? <th>Lote</th> : null}
+              {mode === 'inbound' ? <th>Vence</th> : null}
               <th>Series</th>
             </tr>
           </thead>
@@ -2324,6 +2409,8 @@ function OrderReview({
                   <td>{item.quantity}</td>
                   {mode === 'inbound' ? <td>${Number(item.unitCost ?? product?.purchasePrice ?? 0).toFixed(2)}</td> : null}
                   {mode === 'inbound' ? <td>${(Number(item.unitCost ?? product?.purchasePrice ?? 0) * item.quantity).toFixed(2)}</td> : null}
+                  {mode === 'inbound' ? <td>{item.lotNumber || '-'}</td> : null}
+                  {mode === 'inbound' ? <td>{formatDateOnly(item.expirationDate)}</td> : null}
                   <td>{item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
                 </tr>
               );
@@ -2420,6 +2507,8 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
                 <th>Cantidad</th>
                 {type === 'inbound' ? <th>Costo unit.</th> : null}
                 {type === 'inbound' ? <th>Total</th> : null}
+                {type === 'inbound' ? <th>Lote</th> : null}
+                {type === 'inbound' ? <th>Vence</th> : null}
                 <th>Series</th>
               </tr>
             </thead>
@@ -2431,6 +2520,8 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
                   <td>{item.quantity}</td>
                   {type === 'inbound' ? <td>${Number(item.unitCost ?? item.product?.purchasePrice ?? 0).toFixed(2)}</td> : null}
                   {type === 'inbound' ? <td>${(Number(item.unitCost ?? item.product?.purchasePrice ?? 0) * item.quantity).toFixed(2)}</td> : null}
+                  {type === 'inbound' ? <td>{item.lotNumber || '-'}</td> : null}
+                  {type === 'inbound' ? <td>{formatDateOnly(item.expirationDate)}</td> : null}
                   <td>{item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
                 </tr>
               ))}
@@ -2453,6 +2544,7 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
           <td>${item.product?.name ?? '-'}</td>
           <td>${item.quantity}</td>
           ${type === 'inbound' ? `<td>$${unitCost.toFixed(2)}</td><td>$${(unitCost * item.quantity).toFixed(2)}</td>` : ''}
+          ${type === 'inbound' ? `<td>${item.lotNumber || '-'}</td><td>${formatDateOnly(item.expirationDate)}</td>` : ''}
           <td>${item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
         </tr>
       `;
@@ -2488,7 +2580,7 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
         <table>
           <thead>
             <tr>
-              <th>SKU</th><th>Descripcion</th><th>Cantidad</th>${type === 'inbound' ? '<th>Costo unit.</th><th>Total</th>' : ''}<th>Series</th>
+              <th>SKU</th><th>Descripcion</th><th>Cantidad</th>${type === 'inbound' ? '<th>Costo unit.</th><th>Total</th><th>Lote</th><th>Vence</th>' : ''}<th>Series</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -2543,6 +2635,8 @@ function OrderForm({
           quantity: item.quantity,
           locationId: item.locationId ?? defaultProductLocation,
           unitCost: item.unitCost ?? item.product?.purchasePrice ?? 0,
+          lotNumber: item.lotNumber ?? '',
+          expirationDate: item.expirationDate ? String(item.expirationDate).slice(0, 10) : '',
           serialNumbers: item.serialNumbers,
         }))
       : initialDraft?.items?.length
@@ -2551,9 +2645,11 @@ function OrderForm({
             quantity: item.quantity,
             locationId: item.locationId ?? getProductDefaultLocation(catalogs, item.productId, defaultWarehouse) ?? defaultProductLocation,
             unitCost: item.unitCost ?? catalogs.products.find((product) => product.id === item.productId)?.purchasePrice ?? 0,
+            lotNumber: item.lotNumber ?? '',
+            expirationDate: item.expirationDate ? String(item.expirationDate).slice(0, 10) : '',
             serialNumbers: item.serialNumbers ?? [],
           }))
-      : [{ productId: defaultProductId, quantity: 1, locationId: defaultProductLocation, unitCost: 0, serialNumbers: [] }],
+      : [{ productId: defaultProductId, quantity: 1, locationId: defaultProductLocation, unitCost: 0, lotNumber: '', expirationDate: '', serialNumbers: [] }],
   );
   const [serialDrafts, setSerialDrafts] = useState<Record<number, string>>({});
   const [scannerInput, setScannerInput] = useState('');
@@ -2611,6 +2707,8 @@ function OrderForm({
           quantity: 1,
           locationId: getProductDefaultLocation(catalogs, product.id, warehouseId) ?? locationId,
           unitCost: product.purchasePrice,
+          lotNumber: '',
+          expirationDate: '',
           serialNumbers: [],
         },
       ];
@@ -2768,6 +2866,18 @@ function OrderForm({
                     <input className="wms-input" type="number" min={0} step="0.01" value={Number(item.unitCost ?? product?.purchasePrice ?? 0)} onChange={(event) => updateItem(index, { unitCost: Number(event.target.value) })} />
                   </label>
                 ) : null}
+                {mode === 'inbound' ? (
+                  <label className="wms-label">
+                    Lote
+                    <input className="wms-input" value={item.lotNumber ?? ''} onChange={(event) => updateItem(index, { lotNumber: event.target.value })} placeholder="Lote opcional" />
+                  </label>
+                ) : null}
+                {mode === 'inbound' ? (
+                  <label className="wms-label">
+                    Vencimiento
+                    <input className="wms-input" type="date" value={item.expirationDate ?? ''} onChange={(event) => updateItem(index, { expirationDate: event.target.value })} />
+                  </label>
+                ) : null}
                 {mode === 'outbound' ? (
                   <label className="wms-label">
                     Disponible bodega
@@ -2838,6 +2948,8 @@ function OrderForm({
                             }}
                           />
                           {unit.serialNumber} - {unit.location.name}
+                          {unit.lotNumber ? ` - Lote ${unit.lotNumber}` : ''}
+                          {unit.expirationDate ? ` - Vence ${formatDateOnly(unit.expirationDate)}` : ''}
                         </label>
                       ))}
                       {!serialOptions.length ? <span className="text-sm text-slate-500">Sin series disponibles</span> : null}
@@ -2850,7 +2962,7 @@ function OrderForm({
         })}
       </div>
       <div className="wms-actions justify-between">
-        <button type="button" className="wms-button" onClick={() => setItems((current) => [...current, { productId: '', quantity: 1, locationId, unitCost: 0, serialNumbers: [] }])}>
+        <button type="button" className="wms-button" onClick={() => setItems((current) => [...current, { productId: '', quantity: 1, locationId, unitCost: 0, lotNumber: '', expirationDate: '', serialNumbers: [] }])}>
           Agregar producto
         </button>
         <div className="wms-actions">
@@ -3052,6 +3164,148 @@ function OutboundPage() {
   );
 }
 
+function PickingPage() {
+  const orders = useLoad(() => wmsApi.outbound(), []);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectedKey = selectedIds.join(',');
+  const plan = useLoad<PickingPlan>(() => wmsApi.pickingPlan(selectedIds), [selectedKey]);
+  const eligibleOrders = (orders.data ?? []).filter((order) => ['RESERVED', 'DISPATCHED'].includes(order.status));
+  const displayPlan = plan.data;
+  const selectedSet = new Set(selectedIds);
+  const toggle = (id: string) => {
+    setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  };
+  const selectAll = () => setSelectedIds(eligibleOrders.map((order) => order.id));
+  const complete = async (action: 'dispatch' | 'ship') => {
+    const ids = selectedIds.length ? selectedIds : eligibleOrders.map((order) => order.id);
+    if (!ids.length) return toast.error('No hay despachos para procesar');
+    try {
+      await wmsApi.completePicking(ids, action);
+      toast.success(action === 'ship' ? 'Picking y envio completados' : 'Picking despachado');
+      orders.refresh();
+      plan.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo completar picking');
+    }
+  };
+  return (
+    <>
+      <PageTitle
+        title="Picking guiado"
+        subtitle="Ruta sugerida para preparar uno o varios despachos en la bodega"
+        action={
+          <div className="wms-actions">
+            <button className="wms-button" onClick={selectAll}>Seleccionar todo</button>
+            <button className="wms-button primary" onClick={() => complete('dispatch')}><RouteIcon size={16} /> Marcar despachado</button>
+            <button className="wms-button primary" onClick={() => complete('ship')}><Send size={16} /> Despachar y enviar</button>
+          </div>
+        }
+      />
+      <div className="wms-grid cols-4 mb-5">
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Pedidos</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.orders ?? 0}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Lineas</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.lines ?? 0}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Unidades</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.units ?? 0}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Ubicaciones</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.locations ?? 0}</div></div>
+      </div>
+      <div className="wms-grid cols-2">
+        <div className="wms-card">
+          <div className="wms-card-header">
+            <h3 className="font-extrabold">Despachos disponibles</h3>
+          </div>
+          <div className="wms-card-body grid gap-2">
+            {eligibleOrders.map((order) => (
+              <label className="wms-picking-order" key={order.id}>
+                <input type="checkbox" checked={selectedSet.has(order.id)} onChange={() => toggle(order.id)} />
+                <span>
+                  <strong>{order.orderNo}</strong>
+                  <small>{order.client.name} / {statusLabels[order.status]}</small>
+                </span>
+              </label>
+            ))}
+            {!eligibleOrders.length ? <div className="text-sm text-slate-500">No hay despachos reservados o despachados para picking.</div> : null}
+          </div>
+        </div>
+        <div className="wms-card">
+          <div className="wms-card-header">
+            <h3 className="font-extrabold">Ruta sugerida</h3>
+            <button className="wms-button" onClick={plan.refresh}>Recalcular</button>
+          </div>
+          <div className="wms-card-body">
+            <div className="wms-picking-route">
+              {(displayPlan?.items ?? []).map((item, index) => (
+                <div className="wms-picking-step" key={`${item.orderId}-${item.productId}-${item.locationId}-${index}`}>
+                  <div className="wms-picking-index">{index + 1}</div>
+                  <div>
+                    <div className="font-extrabold">{item.locationCode} / {item.location}</div>
+                    <div className="text-sm text-slate-600">{item.sku} - {item.product}</div>
+                    <div className="text-xs text-slate-500">{item.orderNo} / {item.client}</div>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-slate-700">
+                      <span>Cant. {item.quantity}</span>
+                      <span>Lote {item.lots.length ? item.lots.join(', ') : '-'}</span>
+                      <span>Vence {formatDateOnly(item.expirationDate)}</span>
+                      {item.serials.length ? <span>Series {item.serials.join(', ')}</span> : null}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {!displayPlan?.items?.length ? <div className="text-sm text-slate-500">Seleccione despachos o genere reservas para ver la ruta.</div> : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function zplSafe(value: string) {
+  return value.replace(/[\^~]/g, ' ').slice(0, 42);
+}
+
+function generateOutboundZpl(order: OutboundOrder) {
+  return order.items
+    .map((item, index) => {
+      const sku = zplSafe(item.product?.sku ?? '-');
+      const name = zplSafe(item.product?.name ?? '-');
+      const client = zplSafe(order.client.name);
+      const serials = item.serialNumbers.length ? item.serialNumbers : [`QTY-${item.quantity}`];
+      return serials
+        .map((serial, serialIndex) => {
+          const code = zplSafe(`${order.orderNo}-${sku}-${serialIndex + 1}`);
+          return `^XA
+^CI28
+^PW600
+^LL360
+^FO30,24^A0N,34,34^FD${zplSafe(order.orderNo)}^FS
+^FO30,68^A0N,24,24^FDCliente: ${client}^FS
+^FO30,104^A0N,24,24^FDSKU: ${sku}^FS
+^FO30,138^A0N,24,24^FD${name}^FS
+^FO30,174^A0N,24,24^FDCantidad: ${item.quantity}^FS
+^FO30,208^A0N,24,24^FDSerie/Lote: ${zplSafe(serial)}^FS
+^BY2,2,72
+^FO30,248^BCN,72,Y,N,N^FD${code}^FS
+^FO470,24^A0N,22,22^FD${index + 1}/${order.items.length}^FS
+^XZ`;
+        })
+        .join('\n');
+    })
+    .join('\n');
+}
+
+function downloadText(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadOutboundLabels(order: OutboundOrder) {
+  downloadText(`etiquetas-${order.orderNo}.zpl`, generateOutboundZpl(order));
+  toast.success('Etiquetas ZPL generadas');
+}
+
 function OrdersTable({
   type,
   data,
@@ -3089,6 +3343,11 @@ function OrdersTable({
                 <button className="wms-button" onClick={() => printOrderPdf(type, row.original)}>
                   <FileDown size={16} /> PDF
                 </button>
+                {type === 'outbound' ? (
+                  <button className="wms-button" onClick={() => downloadOutboundLabels(row.original as OutboundOrder)}>
+                    <Printer size={16} /> Etiquetas
+                  </button>
+                ) : null}
                 {['DRAFT', 'PENDING', 'RESERVED'].includes(row.original.status) ? (
                   <button className="wms-button" onClick={() => onEdit(row.original)}>
                     Editar
@@ -3795,19 +4054,21 @@ function RoleForm({ role, onClose, onSaved }: { role: Role | null; onClose: () =
 }
 
 function ReportsPage() {
-  const [type, setType] = useState('stock');
+  const [type, setType] = useState('analytics');
   const { data, refresh } = useLoad(() => wmsApi.reports(`?type=${type}`), [type]);
-  const rows = useMemo(() => normalizeReportRows(type, data ?? []), [type, data]);
+  const rows = useMemo(() => normalizeReportRows(type, Array.isArray(data) ? data : []), [type, data]);
+  const analytics = type === 'analytics' ? (data as ReportAnalytics | null) : null;
   return (
     <>
       <PageTitle
         title="Reportes"
-        subtitle="Reportes consultados desde PostgreSQL con exportacion CSV"
+        subtitle="Indicadores operativos, tiempos de despacho y exportacion CSV"
         action={<button className="wms-button" onClick={() => downloadCsv(`${type}.csv`, rows)}><FileDown size={16} /> CSV</button>}
       />
       <div className="wms-card">
         <div className="wms-card-header">
           <select className="wms-select max-w-sm" value={type} onChange={(event) => setType(event.target.value)}>
+            <option value="analytics">Analitica operativa</option>
             <option value="stock">Stock actual</option>
             <option value="low-stock">Stock bajo minimo</option>
             <option value="available-serials">Series disponibles</option>
@@ -3822,7 +4083,60 @@ function ReportsPage() {
           </select>
           <button className="wms-button" onClick={refresh}>Actualizar</button>
         </div>
-        <ReportTable rows={rows} />
+        {analytics ? (
+          <div className="wms-card-body grid gap-5">
+            <div className="wms-grid cols-2">
+              <div className="wms-card">
+                <div className="wms-card-header"><h3 className="font-extrabold">Movimientos ultimos 14 dias</h3></div>
+                <div className="wms-card-body h-80">
+                  <ResponsiveContainer>
+                    <BarChart data={analytics.movementTrend}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="ingresos" name="Ingresos" fill="#16a34a" />
+                      <Bar dataKey="reservas" name="Reservas" fill="#f59e0b" />
+                      <Bar dataKey="despachos" name="Despachos" fill="#dc2626" />
+                      <Bar dataKey="envios" name="Envios" fill="#2563eb" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="wms-card">
+                <div className="wms-card-header"><h3 className="font-extrabold">Tiempo promedio por estado</h3></div>
+                <div className="wms-card-body h-80">
+                  <ResponsiveContainer>
+                    <BarChart data={analytics.statusAging}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="status" tickFormatter={(value) => statusLabels[value] ?? value} tick={{ fontSize: 10 }} />
+                      <YAxis />
+                      <Tooltip labelFormatter={(value) => statusLabels[String(value)] ?? value} />
+                      <Bar dataKey="avgHours" name="Horas promedio" fill="#dc2626" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+            <div className="wms-grid cols-2">
+              <div className="wms-card">
+                <div className="wms-card-header"><h3 className="font-extrabold">Productos con mas movimiento</h3></div>
+                <ReportTable rows={analytics.topProducts.map((item) => ({ sku: item.sku, producto: item.name, cantidad: item.quantity, movimientos: item.movements }))} />
+              </div>
+              <div className="wms-card">
+                <div className="wms-card-header"><h3 className="font-extrabold">Bajo stock</h3></div>
+                <ReportTable rows={analytics.lowStock.map((item) => ({ sku: item.sku, producto: item.name, disponible: item.available, minimo: item.stockMin }))} />
+              </div>
+            </div>
+            <div className="wms-card">
+              <div className="wms-card-header"><h3 className="font-extrabold">Tiempos de despacho</h3></div>
+              <ReportTable rows={analytics.dispatchCycle.map((item) => ({ documento: item.orderNo, cliente: item.client, estado: statusLabels[item.status] ?? item.status, horas: item.hoursToClose, creado: item.createdAt, cerrado: item.closedAt ?? '' }))} />
+            </div>
+          </div>
+        ) : (
+          <ReportTable rows={rows} />
+        )}
       </div>
     </>
   );
@@ -3832,6 +4146,7 @@ function normalizeReportRows(type: string, data: unknown[]): Record<string, unkn
   if (type === 'stock') {
     return (data as InventoryBalance[]).map((row) => ({ sku: row.product.sku, producto: row.product.name, bodega: row.warehouse.name, ubicacion: row.location.name, estado: statusLabels[row.status], cantidad: row.quantity }));
   }
+  if (type === 'analytics') return [];
   if (type === 'available-serials' || type === 'dispatched-serials') {
     return (data as InventoryUnit[]).map((row) => ({ sku: row.product.sku, producto: row.product.name, serie: row.serialNumber, bodega: row.warehouse.name, ubicacion: row.location.name, estado: statusLabels[row.status] }));
   }

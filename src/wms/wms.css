@@ -709,6 +709,68 @@
   padding: 10px;
 }
 
+.wms-location-blueprint {
+  display: grid;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #eef2f7 1px, transparent 1px), linear-gradient(#eef2f7 1px, transparent 1px), #ffffff;
+  background-size: 44px 44px;
+  padding: 10px;
+}
+
+.wms-blueprint-slot {
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px;
+  color: #334155;
+  text-align: center;
+}
+
+.wms-blueprint-slot span {
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wms-blueprint-slot strong {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.wms-blueprint-slot small {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.wms-blueprint-slot.empty {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.wms-blueprint-slot.filled {
+  border-color: var(--wms-primary-border);
+  background: var(--wms-primary-soft);
+  color: var(--wms-primary-strong);
+}
+
+.wms-blueprint-slot.reserved {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .wms-empty-map {
   border: 1px dashed #cbd5e1;
   border-radius: 8px;
@@ -831,6 +893,50 @@
 
 .wms-map-legend i.reserved {
   background: #f59e0b;
+}
+
+.wms-picking-order {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.wms-picking-order span {
+  display: grid;
+  min-width: 0;
+}
+
+.wms-picking-order small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.wms-picking-route {
+  display: grid;
+  gap: 10px;
+}
+
+.wms-picking-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.wms-picking-index {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--wms-primary);
+  color: #ffffff;
+  font-weight: 900;
 }
 
 .wms-drawer-toggle {
@@ -1208,6 +1314,20 @@
     touch-action: pan-y;
   }
 
+  .wms-location-blueprint {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: none !important;
+    overflow-x: visible;
+    background-size: 28px 28px;
+    padding: 8px;
+  }
+
+  .wms-blueprint-slot {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    min-height: 44px;
+  }
+
   .wms-rack-row {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1351,6 +1471,16 @@
 
   .wms-rack-row {
     grid-template-columns: 1fr;
+  }
+
+  .wms-picking-step {
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .wms-picking-index {
+    width: 30px;
+    height: 30px;
   }
 
   .wms-card-header {

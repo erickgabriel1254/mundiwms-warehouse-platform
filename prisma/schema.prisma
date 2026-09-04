@@ -123,6 +123,11 @@ model Location {
   rack               String              @default("")
   level              String              @default("")
   position           String              @default("")
+  mapX               Int                 @default(0)
+  mapY               Int                 @default(0)
+  mapW               Int                 @default(1)
+  mapH               Int                 @default(1)
+  pickSequence       Int                 @default(0)
   kind               String              @default("STORAGE")
   warehouseId        String
   warehouse          Warehouse           @relation(fields: [warehouseId], references: [id])
@@ -159,6 +164,8 @@ model InventoryUnit {
   productId       String
   product         Product             @relation(fields: [productId], references: [id])
   serialNumber    String?
+  lotNumber       String?
+  expirationDate  DateTime?
   warehouseId     String
   warehouse       Warehouse           @relation(fields: [warehouseId], references: [id])
   locationId      String
@@ -172,6 +179,8 @@ model InventoryUnit {
   @@unique([productId, serialNumber])
   @@index([serialNumber])
   @@index([status])
+  @@index([expirationDate])
+  @@index([lotNumber])
   @@map("inventory_units")
 }
 
@@ -298,6 +307,8 @@ model InboundOrderItem {
   location      Location?    @relation(fields: [locationId], references: [id])
   quantity      Int
   unitCost      Decimal      @default(0) @db.Decimal(12, 2)
+  lotNumber     String?
+  expirationDate DateTime?
   serialNumbers String[]     @default([])
 
   @@map("inbound_order_items")

@@ -210,16 +210,25 @@ function serials(company: Company, product: Product, orderKey: string, quantity:
   return Array.from({ length: quantity }, (_, index) => `${company.code}-${clean(product.sku)}-${clean(orderKey)}-${String(index + 1).padStart(3, '0')}`);
 }
 
+function expirationFor(seed: number, near = false) {
+  const date = new Date();
+  date.setMonth(date.getMonth() + (near ? 2 + (seed % 4) : 8 + (seed % 10)));
+  return date.toISOString().slice(0, 10);
+}
+
 function inboundItems(company: Company, products: Product[], locations: Location[], orderKey: string, sliceStart = 0, sliceCount = 5, factor = 1) {
   return products.slice(sliceStart, sliceStart + sliceCount).map((product, index) => {
     const plan = productPlan(product, sliceStart + index);
     const quantity = Math.max(1, Math.ceil(qty(company, plan) * factor));
     const location = locations[(sliceStart + index) % locations.length];
+    const lotSeed = sliceStart + index + clean(orderKey).length;
     return {
       productId: product.id,
       quantity,
       locationId: location.id,
       unitCost: Math.max(0.01, money(product.purchasePrice)),
+      lotNumber: `LOT-${company.code}-${String(lotSeed).padStart(3, '0')}`,
+      expirationDate: expirationFor(lotSeed, factor < 0.7),
       serialNumbers: product.managesSerial ? serials(company, product, orderKey, quantity) : [],
     };
   });
@@ -391,6 +400,21 @@ async function seedCompany(token: string, company: Company) {
     items: inboundItems(company, products, storage, `${company.code}-LOCAL2`, 5, 5, 0.8),
   }, true));
 
+  for (let wave = 1; wave <= 4; wave += 1) {
+    await ensureImportOrder(token, company, wave % 2 ? supplier.id : supplier2.id, `${MARKER}-${company.code}-PED-WAVE-${wave}`, products, wave === 4 ? 'DRAFT' : 'REQUESTED', wave, 5, 0.75 + wave * 0.12);
+    results.push(await ensureInbound(token, company, `${MARKER}-${company.code}-REC-WAVE-${wave}`, {
+      supplierId: wave % 2 ? supplier.id : supplier2.id,
+      warehouseId: warehouse.id,
+      locationId: receiving.id,
+      status: 'PENDING',
+      purchaseOrder: `${MARKER}-${company.code}-REC-WAVE-${wave}`,
+      carrierName: wave % 2 ? 'Transporte pesado Carvatel' : 'Carga consolidada',
+      guideNumber: `GUIA-${company.code}-2${String(wave).padStart(2, '0')}`,
+      notes: `Recepcion de simulacion ${wave} para historial operativo`,
+      items: inboundItems(company, products, storage, `${company.code}-WAVE${wave}`, wave, 4, 0.55 + wave * 0.15),
+    }, wave !== 4));
+  }
+
   results.push(await ensureInbound(token, company, `${MARKER}-${company.code}-REC-PENDIENTE`, {
     supplierId: supplier2.id,
     warehouseId: warehouse.id,
@@ -443,6 +467,22 @@ async function seedCompany(token: string, company: Company) {
       notes: 'Reserva comercial pendiente de cierre',
       items: reservedItems,
     }, 'RESERVED'));
+  }
+
+  for (let wave = 1; wave <= 5; wave += 1) {
+    inventory = await api<Inventory>(`/inventory?status=AVAILABLE&warehouseId=${encodeURIComponent(warehouse.id)}`, token, company.id);
+    const waveItems = buildOutboundItems(company, inventory.units, products, warehouse.id, `WAVE${wave}`, wave, 5, 0.35 + wave * 0.08);
+    if (!waveItems.length) continue;
+    const finalStatus = wave % 3 === 0 ? 'SHIPPED' : wave % 2 === 0 ? 'DISPATCHED' : 'RESERVED';
+    results.push(await ensureOutbound(token, company, `${MARKER}-${company.code}-OUT-WAVE-${wave}`, {
+      clientId: wave % 2 ? client.id : client2.id,
+      warehouseId: warehouse.id,
+      locationId: dispatch.id,
+      purchaseOrder: `${MARKER}-${company.code}-OUT-WAVE-${wave}`,
+      status: finalStatus === 'RESERVED' ? 'DRAFT' : 'DISPATCHED',
+      notes: `Despacho demo ${wave} para simular carga diaria y picking multiorden`,
+      items: waveItems,
+    }, finalStatus));
   }
 
   const remainingCritical = products

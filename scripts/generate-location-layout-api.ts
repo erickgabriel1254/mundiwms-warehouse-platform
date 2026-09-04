@@ -13,6 +13,11 @@ type Location = {
   rack?: string;
   level?: string;
   position?: string;
+  mapX?: number;
+  mapY?: number;
+  mapW?: number;
+  mapH?: number;
+  pickSequence?: number;
   kind?: string;
 };
 type Catalogs = { warehouses: Warehouse[]; locations: Location[] };
@@ -71,6 +76,9 @@ async function createLayout(token: string, company: Company, config: LayoutConfi
       for (let level = 1; level <= config.levels; level += 1) {
         for (let position = 1; position <= config.positions; position += 1) {
           const locationCode = code(config.zone, aisle, rack, level, position);
+          const mapX = (aisle - 1) * (config.racks + 1) + rack;
+          const mapY = (level - 1) * (config.positions + 1) + position;
+          const pickSequence = aisle * 10000 + rack * 1000 + level * 100 + position;
           const payload = {
             warehouseId: warehouse.id,
             code: locationCode,
@@ -80,6 +88,11 @@ async function createLayout(token: string, company: Company, config: LayoutConfi
             rack: pad(rack),
             level: pad(level),
             position: pad(position),
+            mapX,
+            mapY,
+            mapW: 1,
+            mapH: 1,
+            pickSequence,
             kind: 'STORAGE',
           };
           const existing = existingByCode.get(locationCode);
@@ -90,6 +103,11 @@ async function createLayout(token: string, company: Company, config: LayoutConfi
               existing.rack !== payload.rack ||
               existing.level !== payload.level ||
               existing.position !== payload.position ||
+              existing.mapX !== payload.mapX ||
+              existing.mapY !== payload.mapY ||
+              existing.mapW !== payload.mapW ||
+              existing.mapH !== payload.mapH ||
+              existing.pickSequence !== payload.pickSequence ||
               existing.kind !== payload.kind;
             if (!needsUpdate) continue;
             await rawApi(`/locations/${existing.id}`, token, company.id, {

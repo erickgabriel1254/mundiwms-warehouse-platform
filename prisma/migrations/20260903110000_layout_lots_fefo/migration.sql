@@ -1,0 +1,17 @@
+ALTER TABLE "locations"
+ADD COLUMN IF NOT EXISTS "mapX" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "mapY" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "mapW" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN IF NOT EXISTS "mapH" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN IF NOT EXISTS "pickSequence" INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE "inventory_units"
+ADD COLUMN IF NOT EXISTS "lotNumber" TEXT,
+ADD COLUMN IF NOT EXISTS "expirationDate" TIMESTAMP(3);
+
+ALTER TABLE "inbound_order_items"
+ADD COLUMN IF NOT EXISTS "lotNumber" TEXT,
+ADD COLUMN IF NOT EXISTS "expirationDate" TIMESTAMP(3);
+
+CREATE INDEX IF NOT EXISTS "inventory_units_expirationDate_idx" ON "inventory_units"("expirationDate");
+CREATE INDEX IF NOT EXISTS "inventory_units_lotNumber_idx" ON "inventory_units"("lotNumber");

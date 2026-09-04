@@ -54,6 +54,11 @@ const locationSchema = z.object({
   rack: z.string().trim().max(24).optional().default(''),
   level: z.string().trim().max(24).optional().default(''),
   position: z.string().trim().max(24).optional().default(''),
+  mapX: z.coerce.number().int().min(0).default(0),
+  mapY: z.coerce.number().int().min(0).default(0),
+  mapW: z.coerce.number().int().min(1).max(6).default(1),
+  mapH: z.coerce.number().int().min(1).max(6).default(1),
+  pickSequence: z.coerce.number().int().min(0).default(0),
   kind: z.enum(['STORAGE', 'RECEIVING', 'DISPATCH', 'BLOCKED']).default('STORAGE'),
 });
 
@@ -81,6 +86,8 @@ const orderItemSchema = z.object({
   quantity: z.coerce.number().int().positive(),
   locationId: z.string().optional(),
   unitCost: z.coerce.number().min(0).optional(),
+  lotNumber: z.string().trim().optional(),
+  expirationDate: z.string().trim().optional(),
   serialNumbers: z.array(z.string().trim().min(1)).default([]),
 });
 
@@ -113,6 +120,11 @@ const outboundSchema = z.object({
   status: z.enum(['DRAFT', 'DISPATCHED']).default('DRAFT'),
   notes: z.string().optional(),
   items: z.array(orderItemSchema).min(1),
+});
+
+const pickingCompleteSchema = z.object({
+  orderIds: z.array(z.string().min(1)).min(1),
+  action: z.enum(['dispatch', 'ship']).default('dispatch'),
 });
 
 const adjustmentSchema = z.object({
@@ -150,10 +162,54 @@ function cleanSerials(serials: string[]) {
   return serials.map((serial) => serial.trim().toUpperCase()).filter(Boolean);
 }
 
+function cleanLot(value?: string | null) {
+  return value?.trim().toUpperCase() || null;
+}
+
+function parseOptionalDate(value?: string | null) {
+  if (!value?.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('Fecha de vencimiento invalida');
+  return date;
+}
+
 function ensureUnique(values: string[], message: string) {
   if (new Set(values).size !== values.length) {
     throw new Error(message);
   }
+}
+
+type RouteLocation = {
+  pickSequence?: number | null;
+  mapX?: number | null;
+  mapY?: number | null;
+  zone?: string | null;
+  aisle?: string | null;
+  rack?: string | null;
+  level?: string | null;
+  position?: string | null;
+  name?: string | null;
+};
+
+function compareLocationRoute(a: RouteLocation, b: RouteLocation) {
+  const sequenceA = a.pickSequence || 0;
+  const sequenceB = b.pickSequence || 0;
+  if (sequenceA !== sequenceB) return sequenceA - sequenceB;
+  const mapA = `${String(a.mapY ?? 0).padStart(4, '0')}|${String(a.mapX ?? 0).padStart(4, '0')}`;
+  const mapB = `${String(b.mapY ?? 0).padStart(4, '0')}|${String(b.mapX ?? 0).padStart(4, '0')}`;
+  if (mapA !== mapB) return mapA.localeCompare(mapB, 'es', { numeric: true });
+  return [a.zone, a.aisle, a.rack, a.level, a.position, a.name].join('|').localeCompare([b.zone, b.aisle, b.rack, b.level, b.position, b.name].join('|'), 'es', { numeric: true });
+}
+
+function compareFefoUnits<T extends { expirationDate?: Date | null; createdAt: Date; location?: RouteLocation | null }>(a: T, b: T) {
+  const expiryA = a.expirationDate?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  const expiryB = b.expirationDate?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  if (expiryA !== expiryB) return expiryA - expiryB;
+  if (a.location && b.location) {
+    const route = compareLocationRoute(a.location, b.location);
+    if (route !== 0) return route;
+  }
+  return a.createdAt.getTime() - b.createdAt.getTime();
 }
 
 async function resolveProductLocation(db: Db, productId: string, warehouseId: string, fallbackLocationId?: string | null) {
@@ -698,6 +754,8 @@ export async function saveInbound(body: unknown, userId: string, companyId: stri
             quantity: item.quantity,
             locationId: item.locationId || null,
             unitCost: new Prisma.Decimal(item.unitCost ?? 0),
+            lotNumber: cleanLot(item.lotNumber),
+            expirationDate: parseOptionalDate(item.expirationDate),
             serialNumbers: cleanSerials(item.serialNumbers),
           })),
         },
@@ -728,6 +786,8 @@ export async function saveInbound(body: unknown, userId: string, companyId: stri
           quantity: item.quantity,
           locationId: item.locationId || null,
           unitCost: new Prisma.Decimal(item.unitCost ?? 0),
+          lotNumber: cleanLot(item.lotNumber),
+          expirationDate: parseOptionalDate(item.expirationDate),
           serialNumbers: cleanSerials(item.serialNumbers),
         })),
       },
@@ -766,6 +826,8 @@ export async function confirmInbound(id: string, userId: string, companyId: stri
             data: {
               productId: item.productId,
               serialNumber: item.product.managesSerial ? serials[index] : null,
+              lotNumber: cleanLot(item.lotNumber),
+              expirationDate: parseOptionalDate(item.expirationDate),
               warehouseId: targetLocation.warehouseId,
               locationId: targetLocation.id,
               status: 'AVAILABLE',
@@ -999,10 +1061,11 @@ export async function reserveOutbound(id: string, userId: string, companyId: str
           });
         }
       } else {
-        const units = await tx.inventoryUnit.findMany({
+        const availableUnits = await tx.inventoryUnit.findMany({
           where: { productId: item.productId, status: 'AVAILABLE', warehouseId: order.warehouseId },
-          take: item.quantity,
+          include: { location: true },
         });
+        const units = availableUnits.sort(compareFefoUnits).slice(0, item.quantity);
         if (units.length !== item.quantity) throw new Error(`Stock insuficiente para ${item.product.sku}`);
         await tx.inventoryUnit.updateMany({ where: { id: { in: units.map((unit) => unit.id) } }, data: { status: 'RESERVED' } });
         await tx.kardexMovement.create({
@@ -1063,10 +1126,11 @@ export async function dispatchOutbound(id: string, userId: string, companyId: st
           });
         }
       } else {
-        const units = await tx.inventoryUnit.findMany({
+        const availableUnits = await tx.inventoryUnit.findMany({
           where: { productId: item.productId, status: 'RESERVED', warehouseId: order.warehouseId },
-          take: item.quantity,
+          include: { location: true },
         });
+        const units = availableUnits.sort(compareFefoUnits).slice(0, item.quantity);
         if (units.length !== item.quantity) throw new Error(`Stock reservado insuficiente para ${item.product.sku}`);
         await tx.inventoryUnit.updateMany({
           where: { id: { in: units.map((unit) => unit.id) } },
@@ -1153,6 +1217,129 @@ export async function cancelOutbound(id: string, companyId: string, userId?: str
   });
   await auditLog({ companyId, userId, action: 'CANCEL', entity: 'OutboundOrder', entityId: id, summary: 'Despacho cancelado o liberado' });
   return result;
+}
+
+export async function getPickingPlan(query: URLSearchParams, companyId: string) {
+  const orderIds = (query.get('orders') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const orders = await prisma.outboundOrder.findMany({
+    where: {
+      companyId,
+      status: { in: ['RESERVED', 'DISPATCHED'] },
+      ...(orderIds.length ? { id: { in: orderIds } } : {}),
+    },
+    orderBy: { createdAt: 'asc' },
+    include: { client: true, warehouse: true, location: true, createdBy: { include: { role: true } }, items: { include: { product: true } } },
+  });
+  const routeItems: Array<{
+    orderId: string;
+    orderNo: string;
+    client: string;
+    purchaseOrder: string | null;
+    productId: string;
+    sku: string;
+    product: string;
+    quantity: number;
+    serials: string[];
+    lots: string[];
+    expirationDate: Date | null;
+    warehouse: string;
+    warehouseId: string;
+    location: string;
+    locationId: string;
+    locationCode: string;
+    routeOrder: number;
+    mapX: number;
+    mapY: number;
+  }> = [];
+  const allocatedUnitIds = new Set<string>();
+
+  for (const order of orders) {
+    for (const item of order.items) {
+      const serials = cleanSerials(item.serialNumbers);
+      const units = item.product.managesSerial
+        ? await prisma.inventoryUnit.findMany({
+            where: { productId: item.productId, serialNumber: { in: serials }, status: order.status, warehouseId: order.warehouseId },
+            include: { product: true, warehouse: true, location: true },
+          })
+        : await prisma.inventoryUnit.findMany({
+            where: { productId: item.productId, status: order.status, warehouseId: order.warehouseId },
+            include: { product: true, warehouse: true, location: true },
+          });
+      const sortedUnits = units.filter((unit) => !allocatedUnitIds.has(unit.id)).sort(compareFefoUnits).slice(0, item.quantity);
+      sortedUnits.forEach((unit) => allocatedUnitIds.add(unit.id));
+      const grouped = new Map<string, typeof sortedUnits>();
+      for (const unit of sortedUnits) {
+        const current = grouped.get(unit.locationId) ?? [];
+        current.push(unit);
+        grouped.set(unit.locationId, current);
+      }
+      for (const group of grouped.values()) {
+        const first = group[0];
+        if (!first) continue;
+        const earliest = group
+          .map((unit) => unit.expirationDate)
+          .filter((date): date is Date => Boolean(date))
+          .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+        routeItems.push({
+          orderId: order.id,
+          orderNo: order.orderNo,
+          client: order.client.name,
+          purchaseOrder: order.purchaseOrder,
+          productId: item.productId,
+          sku: item.product.sku,
+          product: item.product.name,
+          quantity: group.length,
+          serials: group.map((unit) => unit.serialNumber).filter((serial): serial is string => Boolean(serial)),
+          lots: Array.from(new Set(group.map((unit) => unit.lotNumber).filter((lot): lot is string => Boolean(lot)))),
+          expirationDate: earliest,
+          warehouse: first.warehouse.name,
+          warehouseId: first.warehouseId,
+          location: first.location.name,
+          locationId: first.locationId,
+          locationCode: first.location.code,
+          routeOrder: first.location.pickSequence || 0,
+          mapX: first.location.mapX || 0,
+          mapY: first.location.mapY || 0,
+        });
+      }
+    }
+  }
+
+  routeItems.sort((a, b) =>
+    compareLocationRoute({ pickSequence: a.routeOrder, mapX: a.mapX, mapY: a.mapY, name: a.location }, { pickSequence: b.routeOrder, mapX: b.mapX, mapY: b.mapY, name: b.location }) ||
+    a.sku.localeCompare(b.sku, 'es', { numeric: true }) ||
+    a.orderNo.localeCompare(b.orderNo, 'es', { numeric: true }),
+  );
+
+  return {
+    orders,
+    items: routeItems,
+    totals: {
+      orders: orders.length,
+      lines: routeItems.length,
+      units: routeItems.reduce((sum, item) => sum + item.quantity, 0),
+      locations: new Set(routeItems.map((item) => item.locationId)).size,
+    },
+  };
+}
+
+export async function completePicking(body: unknown, userId: string, companyId: string) {
+  const data = pickingCompleteSchema.parse(body);
+  const uniqueOrderIds = Array.from(new Set(data.orderIds));
+  for (const orderId of uniqueOrderIds) {
+    if (data.action === 'ship') {
+      const order = await prisma.outboundOrder.findFirst({ where: { id: orderId, companyId }, select: { status: true } });
+      if (order?.status === 'RESERVED') await dispatchOutbound(orderId, userId, companyId);
+      await shipOutbound(orderId, userId, companyId);
+    } else {
+      await dispatchOutbound(orderId, userId, companyId);
+    }
+  }
+  await auditLog({ companyId, userId, action: 'PICKING', entity: 'OutboundOrder', summary: `Picking guiado completado para ${uniqueOrderIds.length} ordenes`, metadata: { orderIds: uniqueOrderIds, action: data.action } });
+  return { ok: true, processed: uniqueOrderIds.length };
 }
 
 export async function listKardex(query: URLSearchParams, companyId: string) {
@@ -1422,6 +1609,11 @@ export async function saveLocation(body: unknown, companyId: string, id?: string
     rack: data.rack.trim(),
     level: data.level.trim(),
     position: data.position.trim(),
+    mapX: data.mapX,
+    mapY: data.mapY,
+    mapW: data.mapW,
+    mapH: data.mapH,
+    pickSequence: data.pickSequence,
     kind: data.kind,
   };
   const result = id ? await prisma.location.update({
@@ -1530,6 +1722,87 @@ export async function deleteUser(id: string, roleCode: string, currentUserId: st
 
 export async function getReports(query: URLSearchParams, companyId: string) {
   const type = query.get('type') ?? 'stock';
+  if (type === 'analytics') {
+    const [movements, outboundOrders, products] = await Promise.all([
+      prisma.kardexMovement.findMany({
+        where: { warehouse: { companyId }, createdAt: { gte: new Date(Date.now() - 30 * 86400000) } },
+        include: { product: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.outboundOrder.findMany({
+        where: { companyId },
+        include: { client: true },
+        orderBy: { createdAt: 'desc' },
+        take: 120,
+      }),
+      prisma.product.findMany({ include: { inventoryBalances: { where: { warehouse: { companyId } } } } }),
+    ]);
+    const movementTrend = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(Date.now() - (13 - index) * 86400000);
+      return {
+        date: date.toISOString().slice(0, 10),
+        ingresos: 0,
+        reservas: 0,
+        despachos: 0,
+        envios: 0,
+        ajustes: 0,
+      };
+    });
+    const trendByDate = new Map(movementTrend.map((item) => [item.date, item]));
+    const topProducts = new Map<string, { sku: string; name: string; quantity: number; movements: number }>();
+    for (const movement of movements) {
+      const day = movement.createdAt.toISOString().slice(0, 10);
+      const bucket = trendByDate.get(day);
+      if (bucket) {
+        if (movement.type === 'INBOUND') bucket.ingresos += Math.abs(movement.quantity);
+        else if (movement.type === 'RESERVATION') bucket.reservas += Math.abs(movement.quantity);
+        else if (movement.type === 'DISPATCH') bucket.despachos += Math.abs(movement.quantity);
+        else if (movement.type === 'SHIPMENT') bucket.envios += Math.abs(movement.quantity);
+        else bucket.ajustes += Math.abs(movement.quantity);
+      }
+      const current = topProducts.get(movement.productId) ?? { sku: movement.product.sku, name: movement.product.name, quantity: 0, movements: 0 };
+      current.quantity += Math.abs(movement.quantity);
+      current.movements += 1;
+      topProducts.set(movement.productId, current);
+    }
+    const now = Date.now();
+    const dispatchCycle = outboundOrders.map((order) => {
+      const closedAt = order.status === 'SHIPPED' || order.status === 'DISPATCHED' ? order.confirmedAt : null;
+      const end = closedAt?.getTime() ?? now;
+      return {
+        orderNo: order.orderNo,
+        client: order.client.name,
+        status: order.status,
+        createdAt: order.createdAt,
+        closedAt,
+        hoursToClose: Math.round(((end - order.createdAt.getTime()) / 3600000) * 10) / 10,
+      };
+    });
+    const statusGroups = new Map<string, { status: string; total: number; hours: number }>();
+    for (const order of dispatchCycle) {
+      const current = statusGroups.get(order.status) ?? { status: order.status, total: 0, hours: 0 };
+      current.total += 1;
+      current.hours += order.hoursToClose;
+      statusGroups.set(order.status, current);
+    }
+    const lowStock = products
+      .map((product) => ({
+        sku: product.sku,
+        name: product.name,
+        available: product.inventoryBalances.filter((balance) => balance.status === 'AVAILABLE').reduce((sum, balance) => sum + balance.quantity, 0),
+        stockMin: product.stockMin,
+      }))
+      .filter((product) => product.available <= product.stockMin)
+      .sort((a, b) => a.available - b.available)
+      .slice(0, 12);
+    return {
+      movementTrend,
+      dispatchCycle: dispatchCycle.slice(0, 20),
+      statusAging: Array.from(statusGroups.values()).map((item) => ({ status: item.status, total: item.total, avgHours: Math.round((item.hours / item.total) * 10) / 10 })),
+      topProducts: Array.from(topProducts.values()).sort((a, b) => b.quantity - a.quantity).slice(0, 12),
+      lowStock,
+    };
+  }
   if (type === 'low-stock') {
     const products = await listProducts('', companyId);
     return products

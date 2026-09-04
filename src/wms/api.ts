@@ -93,6 +93,13 @@ export const wmsApi = {
   dispatchOutbound: (id: string) => api(`/outbound/${id}/dispatch`, { method: 'POST' }),
   shipOutbound: (id: string) => api(`/outbound/${id}/ship`, { method: 'POST' }),
   cancelOutbound: (id: string) => api(`/outbound/${id}/cancel`, { method: 'POST' }),
+  pickingPlan: (orderIds: string[] = []) =>
+    api<import('./types').PickingPlan>(`/picking/plan${orderIds.length ? `?orders=${encodeURIComponent(orderIds.join(','))}` : ''}`),
+  completePicking: (orderIds: string[], action: 'dispatch' | 'ship') =>
+    api<{ ok: boolean; processed: number }>('/picking/complete', {
+      method: 'POST',
+      body: JSON.stringify({ orderIds, action }),
+    }),
   kardex: (query = '') => api<import('./types').KardexMovement[]>(`/kardex${query}`),
   saveAdjustment: (payload: unknown) => api('/adjustments', { method: 'POST', body: JSON.stringify(payload) }),
   saveWarehouse: (payload: unknown, id?: string) =>
@@ -128,7 +135,7 @@ export const wmsApi = {
       body: JSON.stringify(payload),
     }),
   deleteContact: (type: 'clients' | 'suppliers', id: string) => api<{ ok: boolean; mode: 'DELETED' | 'INACTIVATED' }>(`/${type}/${id}`, { method: 'DELETE' }),
-  reports: (query = '') => api<unknown[]>(`/reports${query}`),
+  reports: (query = '') => api<unknown[] | import('./types').ReportAnalytics>(`/reports${query}`),
 };
 
 export function toCsv(rows: Record<string, unknown>[]) {

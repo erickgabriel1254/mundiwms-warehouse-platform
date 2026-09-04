@@ -79,6 +79,11 @@ export type Location = {
   rack?: string;
   level?: string;
   position?: string;
+  mapX?: number;
+  mapY?: number;
+  mapW?: number;
+  mapH?: number;
+  pickSequence?: number;
   kind?: 'STORAGE' | 'RECEIVING' | 'DISPATCH' | 'BLOCKED' | string;
   warehouseId: string;
   warehouse?: Warehouse;
@@ -90,6 +95,8 @@ export type InventoryUnit = {
   id: string;
   productId: string;
   serialNumber?: string | null;
+  lotNumber?: string | null;
+  expirationDate?: string | null;
   warehouseId: string;
   locationId: string;
   status: UnitStatus;
@@ -132,6 +139,8 @@ export type OrderItem = {
   location?: Location | null;
   quantity: number;
   unitCost?: number | string;
+  lotNumber?: string | null;
+  expirationDate?: string | null;
   serialNumbers: string[];
 };
 
@@ -246,4 +255,45 @@ export type DashboardData = {
   byCategory: { category: string; total: number }[];
   lowStockProducts: { id: string; sku: string; name: string; stockMin: number; available: number }[];
   topMovingProducts: { id: string; sku: string; name: string; movements: number; quantity: number }[];
+};
+
+export type PickingPlanItem = {
+  orderId: string;
+  orderNo: string;
+  client: string;
+  purchaseOrder?: string | null;
+  productId: string;
+  sku: string;
+  product: string;
+  quantity: number;
+  serials: string[];
+  lots: string[];
+  expirationDate?: string | null;
+  warehouse: string;
+  warehouseId: string;
+  location: string;
+  locationId: string;
+  locationCode: string;
+  routeOrder: number;
+  mapX: number;
+  mapY: number;
+};
+
+export type PickingPlan = {
+  orders: OutboundOrder[];
+  items: PickingPlanItem[];
+  totals: {
+    orders: number;
+    lines: number;
+    units: number;
+    locations: number;
+  };
+};
+
+export type ReportAnalytics = {
+  movementTrend: { date: string; ingresos: number; reservas: number; despachos: number; envios: number; ajustes: number }[];
+  dispatchCycle: { orderNo: string; client: string; status: string; createdAt: string; closedAt?: string | null; hoursToClose: number }[];
+  statusAging: { status: string; total: number; avgHours: number }[];
+  topProducts: { sku: string; name: string; quantity: number; movements: number }[];
+  lowStock: { sku: string; name: string; available: number; stockMin: number }[];
 };
