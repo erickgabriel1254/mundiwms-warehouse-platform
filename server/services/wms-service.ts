@@ -119,7 +119,7 @@ const outboundSchema = z.object({
   warehouseId: z.string().min(1),
   locationId: z.string().min(1),
   purchaseOrder: z.string().optional(),
-  status: z.enum(['DRAFT', 'DISPATCHED']).default('DRAFT'),
+  status: z.enum(['DRAFT', 'RESERVED', 'DISPATCHED']).default('DRAFT'),
   notes: z.string().optional(),
   items: z.array(orderItemSchema).min(1),
 });
@@ -349,7 +349,7 @@ export async function getDashboard(companyId: string) {
     prisma.inventoryUnit.findMany({ where: { warehouse: { companyId } } }),
     prisma.inboundOrder.count({ where: { companyId, status: { in: ['DRAFT', 'PENDING'] } } }),
     prisma.outboundOrder.count({ where: { companyId, status: 'RESERVED' } }),
-    prisma.outboundOrder.count({ where: { companyId, status: 'DISPATCHED' } }),
+    prisma.outboundOrder.count({ where: { companyId, status: { in: ['PACKING', 'DISPATCHED'] } } }),
     prisma.kardexMovement.findMany({
       where: { warehouse: { companyId } },
       take: 10,
@@ -410,7 +410,7 @@ export async function getDashboard(companyId: string) {
         user: user.name,
         role: user.role.name,
         pendingPicking: rows.filter((order) => order.status === 'RESERVED').length,
-        dispatched: rows.filter((order) => order.status === 'DISPATCHED').length,
+        dispatched: rows.filter((order) => ['PACKING', 'DISPATCHED'].includes(order.status)).length,
         shipped: rows.filter((order) => order.status === 'SHIPPED').length,
         avgDispatchHours: dispatchHours.length ? Number((dispatchHours.reduce((sum, value) => sum + value, 0) / dispatchHours.length).toFixed(1)) : 0,
         avgShipmentHours: shipmentHours.length ? Number((shipmentHours.reduce((sum, value) => sum + value, 0) / shipmentHours.length).toFixed(1)) : 0,
@@ -1038,7 +1038,7 @@ export async function saveOutbound(body: unknown, userId: string, companyId: str
       });
       await rebuildBalances(tx);
     }, TX_OPTIONS);
-    if (data.status === 'DRAFT') await reserveOutbound(id, userId, companyId);
+    if (data.status === 'RESERVED') await reserveOutbound(id, userId, companyId);
     if (data.status === 'DISPATCHED') await dispatchOutbound(id, userId, companyId);
     return prisma.outboundOrder.findUniqueOrThrow({
       where: { id },
@@ -1054,7 +1054,7 @@ export async function saveOutbound(body: unknown, userId: string, companyId: str
       warehouseId: data.warehouseId,
       locationId: data.locationId,
       purchaseOrder: data.purchaseOrder?.trim() || null,
-      status: data.status === 'DISPATCHED' ? 'DRAFT' : data.status,
+      status: 'DRAFT',
       notes: data.notes,
       createdById: userId,
       items: {
@@ -1069,7 +1069,7 @@ export async function saveOutbound(body: unknown, userId: string, companyId: str
 
   if (data.status === 'DISPATCHED') {
     await dispatchOutbound(order.id, userId, companyId);
-  } else {
+  } else if (data.status === 'RESERVED') {
     await reserveOutbound(order.id, userId, companyId);
   }
   return prisma.outboundOrder.findUniqueOrThrow({
@@ -1197,18 +1197,18 @@ export async function dispatchOutbound(id: string, userId: string, companyId: st
         });
       }
     }
-    await tx.outboundOrder.update({ where: { id }, data: { status: 'DISPATCHED', confirmedAt: new Date() } });
+    await tx.outboundOrder.update({ where: { id }, data: { status: 'PACKING', confirmedAt: new Date() } });
     await rebuildBalances(tx);
     return { ok: true };
   }, TX_OPTIONS);
-  await auditLog({ companyId, userId, action: 'DISPATCH', entity: 'OutboundOrder', entityId: id, summary: 'Despacho confirmado' });
+  await auditLog({ companyId, userId, action: 'PICKING', entity: 'OutboundOrder', entityId: id, summary: 'Picking completado y enviado a packing' });
   return result;
 }
 
 export async function shipOutbound(id: string, userId: string, companyId: string) {
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
-    if (!order || order.status !== 'DISPATCHED') throw new Error('Solo se puede enviar una orden despachada');
+    if (!order || !['PACKING', 'DISPATCHED'].includes(order.status)) throw new Error('Solo se puede enviar una orden en packing');
 
     for (const item of order.items) {
       const serials = cleanSerials(item.serialNumbers);
@@ -1244,8 +1244,8 @@ export async function shipOutbound(id: string, userId: string, companyId: string
 export async function cancelOutbound(id: string, companyId: string, userId?: string) {
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
-    if (!order || !['DRAFT', 'RESERVED', 'DISPATCHED'].includes(order.status)) throw new Error('La orden no puede cancelarse');
-    if (['RESERVED', 'DISPATCHED'].includes(order.status)) {
+    if (!order || !['DRAFT', 'RESERVED', 'PACKING', 'DISPATCHED'].includes(order.status)) throw new Error('La orden no puede cancelarse');
+    if (['RESERVED', 'PACKING', 'DISPATCHED'].includes(order.status)) {
       for (const item of order.items) {
         if (item.product.managesSerial) {
           await tx.inventoryUnit.updateMany({
@@ -1380,15 +1380,15 @@ export async function completePicking(body: unknown, userId: string, companyId: 
   const data = pickingCompleteSchema.parse(body);
   const uniqueOrderIds = Array.from(new Set(data.orderIds));
   for (const orderId of uniqueOrderIds) {
-    if (data.action === 'ship') {
-      const order = await prisma.outboundOrder.findFirst({ where: { id: orderId, companyId }, select: { status: true } });
-      if (order?.status === 'RESERVED') await dispatchOutbound(orderId, userId, companyId);
-      await shipOutbound(orderId, userId, companyId);
-    } else {
-      await dispatchOutbound(orderId, userId, companyId);
-    }
+      if (data.action === 'ship') {
+        const order = await prisma.outboundOrder.findFirst({ where: { id: orderId, companyId }, select: { status: true } });
+        if (order?.status === 'RESERVED') await dispatchOutbound(orderId, userId, companyId);
+        await shipOutbound(orderId, userId, companyId);
+      } else {
+        await dispatchOutbound(orderId, userId, companyId);
+      }
   }
-  await auditLog({ companyId, userId, action: 'PICKING', entity: 'OutboundOrder', summary: `Picking guiado completado para ${uniqueOrderIds.length} ordenes`, metadata: { orderIds: uniqueOrderIds, action: data.action } });
+  await auditLog({ companyId, userId, action: 'PICKING', entity: 'OutboundOrder', summary: `Picking guiado completado para ${uniqueOrderIds.length} ordenes y enviado a packing`, metadata: { orderIds: uniqueOrderIds, action: data.action } });
   return { ok: true, processed: uniqueOrderIds.length };
 }
 

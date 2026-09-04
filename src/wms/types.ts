@@ -1,6 +1,6 @@
 export type RoleCode = 'ADMIN' | 'OPERATOR' | 'SUPERVISOR';
 export type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'BLOCKED' | 'DISPATCHED' | 'SHIPPED' | 'RETURNING';
-export type OrderStatus = 'DRAFT' | 'PENDING' | 'REQUESTED' | 'PARTIAL' | 'RECEIVED' | 'RESERVED' | 'DISPATCHED' | 'SHIPPED' | 'CANCELLED';
+export type OrderStatus = 'DRAFT' | 'PENDING' | 'REQUESTED' | 'PARTIAL' | 'RECEIVED' | 'RESERVED' | 'PACKING' | 'DISPATCHED' | 'SHIPPED' | 'CANCELLED';
 
 export type UserSession = {
   id: string;

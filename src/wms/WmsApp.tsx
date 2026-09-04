@@ -88,6 +88,7 @@ const statusLabels: Record<string, string> = {
   INACTIVE: 'Inactivo',
   AVAILABLE: 'Disponible',
   RESERVED: 'Reservado',
+  PACKING: 'Packing',
   BLOCKED: 'Bloqueado',
   DISPATCHED: 'Despachado',
   SHIPPED: 'Enviado',
@@ -232,6 +233,7 @@ function AppShell() {
     ['/bodegas', 'Bodegas', Warehouse],
     ['/conteo-ciclico', 'Conteo ciclico', ClipboardList],
     ['/picking', 'Picking guiado', RouteIcon],
+    ['/packing', 'Packing', PackagePlus],
     ['/pedidos', 'Generar pedido', ClipboardList],
     ['/recepcion', 'Recepcion', PackagePlus],
     ['/despacho', 'Despacho', Truck],
@@ -332,6 +334,7 @@ function AppShell() {
               <Route path="/bodegas" element={<WarehousesPage />} />
               <Route path="/conteo-ciclico" element={<CycleCountPage />} />
               <Route path="/picking" element={<PickingPage />} />
+              <Route path="/packing" element={<PackingPage />} />
               <Route path="/pedidos" element={<ImportOrdersPage />} />
               <Route path="/recepcion" element={<InboundPage />} />
               <Route path="/despacho" element={<OutboundPage />} />
@@ -418,7 +421,7 @@ function PageTitle({ title, subtitle, action }: { title: string; subtitle: strin
 }
 
 function Badge({ value }: { value: string }) {
-  const color = ['ACTIVE', 'AVAILABLE', 'RECEIVED', 'DISPATCHED'].includes(value)
+  const color = ['ACTIVE', 'AVAILABLE', 'RECEIVED', 'DISPATCHED', 'PACKING'].includes(value)
     ? 'green'
     : ['DRAFT', 'PENDING', 'REQUESTED', 'RESERVED'].includes(value)
       ? 'amber'
@@ -508,7 +511,7 @@ function DashboardPage() {
   const cards = [
     ['Recepciones por ingresar', data.totals.inboundPending],
     ['Picking pendiente', data.totals.outboundPending],
-    ['Despachos listos', data.totals.outboundDispatched],
+    ['Packing pendiente', data.totals.outboundDispatched],
     ['Bajo stock', data.totals.lowStock],
   ];
   return (
@@ -572,7 +575,7 @@ function DashboardPage() {
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="pendingPicking" name="Picking pendiente" fill="#f59e0b" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="dispatched" name="Despachado" fill="#dc2626" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="dispatched" name="Packing" fill="#dc2626" radius={[6, 6, 0, 0]} />
                 <Bar dataKey="shipped" name="Enviado" fill="#16a34a" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -583,7 +586,7 @@ function DashboardPage() {
               { header: 'Usuario', accessorKey: 'user' },
               { header: 'Rol', accessorKey: 'role' },
               { header: 'Picking pendiente', accessorKey: 'pendingPicking' },
-              { header: 'Despachado', accessorKey: 'dispatched' },
+              { header: 'Packing', accessorKey: 'dispatched' },
               { header: 'Enviado', accessorKey: 'shipped' },
               { header: 'Prom. despacho h', accessorKey: 'avgDispatchHours' },
               { header: 'Prom. envio h', accessorKey: 'avgShipmentHours' },
@@ -2835,8 +2838,37 @@ function ShipmentReview({
   onEdit: () => void;
   onClose: () => void;
 }) {
+  const [scan, setScan] = useState('');
+  const [packedKeys, setPackedKeys] = useState<string[]>([]);
+  const lineKey = (item: OrderItem, index: number) => item.id ?? `${item.productId}-${index}`;
+  const packedSet = new Set(packedKeys);
+  const allPacked = order.items.length > 0 && order.items.every((item, index) => packedSet.has(lineKey(item, index)));
+  const validatePackingScan = (event: FormEvent) => {
+    event.preventDefault();
+    const scanned = normalizeScan(scan);
+    if (!scanned) return;
+    const nextIndex = order.items.findIndex((item, index) => {
+      if (packedSet.has(lineKey(item, index))) return false;
+      const accepted = [
+        item.product?.sku ?? '',
+        item.product?.barcode ?? '',
+        ...(item.product?.barcodes ?? []),
+        ...item.serialNumbers,
+      ].map(normalizeScan).filter(Boolean);
+      return accepted.includes(scanned);
+    });
+    if (nextIndex < 0) {
+      toast.error('El escaneo no coincide con material pendiente de packing');
+      setScan('');
+      return;
+    }
+    const item = order.items[nextIndex];
+    setPackedKeys((current) => [...current, lineKey(item, nextIndex)]);
+    setScan('');
+    toast.success(`${item.product?.sku ?? 'SKU'} separado para envio`);
+  };
   return (
-    <Modal title={`Enviar despacho ${order.orderNo}`} onClose={onClose}>
+    <Modal title={`Packing y envio ${order.orderNo}`} onClose={onClose}>
       <div className="wms-grid">
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
           <div className="font-extrabold">Cliente: {order.client.name}</div>
@@ -2844,6 +2876,16 @@ function ShipmentReview({
           <div>Orden de compra: {order.purchaseOrder || '-'}</div>
           <div>Documento: {order.orderNo}</div>
         </div>
+        <form className="wms-scan-panel" onSubmit={validatePackingScan}>
+          <input
+            className="wms-input"
+            value={scan}
+            onChange={(event) => setScan(event.target.value)}
+            placeholder="Escanee SKU, codigo de barras o serie para separar"
+            autoFocus
+          />
+          <button className="wms-button primary">Validar packing</button>
+        </form>
         <div className="wms-table-wrap">
           <table className="wms-table compact">
             <thead>
@@ -2852,23 +2894,25 @@ function ShipmentReview({
                 <th>Descripcion</th>
                 <th>Cantidad</th>
                 <th>Series</th>
+                <th>Estado</th>
               </tr>
             </thead>
             <tbody>
-              {order.items.map((item) => (
-                <tr key={item.id ?? item.productId}>
+              {order.items.map((item, index) => (
+                <tr key={lineKey(item, index)}>
                   <td>{item.product?.sku}</td>
                   <td>{item.product?.name}</td>
                   <td>{item.quantity}</td>
                   <td>{item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
+                  <td>{packedSet.has(lineKey(item, index)) ? <Badge value="RECEIVED" /> : <Badge value="PENDING" />}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <div className="wms-actions justify-end">
-          <button className="wms-button" onClick={onEdit}>Editar</button>
-          <button className="wms-button primary" onClick={onSend}>Enviar</button>
+          <button className="wms-button" onClick={onEdit}>Revisar detalle</button>
+          <button className="wms-button primary" onClick={onSend} disabled={!allPacked}>Confirmar envio</button>
         </div>
       </div>
     </Modal>
@@ -3137,7 +3181,7 @@ function OrderForm({
       locationId,
       importOrderId: initialDraft?.importOrderId,
       purchaseOrder,
-      status: intent === 'draft' ? 'DRAFT' : mode === 'inbound' ? 'PENDING' : 'DISPATCHED',
+      status: intent === 'draft' ? 'DRAFT' : mode === 'inbound' ? 'PENDING' : 'RESERVED',
       notes,
       carrierName,
       guideNumber,
@@ -3371,7 +3415,7 @@ function OrderForm({
           </button>
           <button className="wms-button primary" name="intent" value="final">
             {mode === 'outbound' ? <Send size={16} /> : <Save size={16} />}
-            {mode === 'outbound' ? 'Finalizar despacho' : 'Finalizar recepcion'}
+            {mode === 'outbound' ? 'Generar despacho' : 'Finalizar recepcion'}
           </button>
         </div>
       </div>
@@ -3484,7 +3528,6 @@ function OutboundPage() {
   const [creating, setCreating] = useState(false);
   const [prefillOrder, setPrefillOrder] = useState<OutboundOrder | null>(null);
   const [detailOrder, setDetailOrder] = useState<OutboundOrder | null>(null);
-  const [shippingReview, setShippingReview] = useState<OutboundOrder | null>(null);
   const catalogs = useLoad(() => wmsApi.catalogs(), []);
   const orders = useLoad(() => wmsApi.outbound(), []);
   const inventory = useLoad(() => wmsApi.inventory('?status=AVAILABLE'), []);
@@ -3503,7 +3546,7 @@ function OutboundPage() {
   };
   return (
     <>
-      <PageTitle title="Despachos / envio" subtitle="Prepara despachos y confirma el envio final" action={<button className="wms-button primary" onClick={() => setCreating(true)}><Send size={16} /> Nuevo despacho</button>} />
+      <PageTitle title="Despachos" subtitle="Genere ordenes y reserve stock para picking guiado" action={<button className="wms-button primary" onClick={() => setCreating(true)}><Send size={16} /> Nuevo despacho</button>} />
       <OrdersTable
         type="outbound"
         data={orders.data ?? []}
@@ -3513,11 +3556,7 @@ function OutboundPage() {
           setCreating(true);
         }}
         onReserve={(id) => action(wmsApi.reserveOutbound(id), 'Stock reservado')}
-        onConfirm={(id) => action(wmsApi.dispatchOutbound(id), 'Despacho confirmado')}
-        onShip={(id) => {
-          const order = orders.data?.find((item) => item.id === id) as OutboundOrder | undefined;
-          if (order) setShippingReview(order);
-        }}
+        onConfirm={(id) => action(wmsApi.reserveOutbound(id), 'Despacho generado y stock reservado')}
         onCancel={(id) => action(wmsApi.cancelOutbound(id), 'Orden cancelada')}
       />
       {creating && catalogs.data ? (
@@ -3529,11 +3568,8 @@ function OutboundPage() {
             mode="outbound"
             onCancel={() => { setCreating(false); setPrefillOrder(null); }}
             onSubmit={async (payload) => {
-              const order = await wmsApi.saveOutbound(payload, prefillOrder?.id);
-              toast.success(payload.status === 'DRAFT' ? 'Despacho guardado y stock reservado' : 'Despacho finalizado');
-              if (payload.status === 'DISPATCHED') {
-                setShippingReview(order as OutboundOrder);
-              }
+              await wmsApi.saveOutbound(payload, prefillOrder?.id);
+              toast.success(payload.status === 'DRAFT' ? 'Despacho guardado como borrador' : 'Despacho generado para picking');
               setCreating(false);
               setPrefillOrder(null);
               refresh();
@@ -3541,17 +3577,89 @@ function OutboundPage() {
           />
         </Modal>
       ) : null}
+      {detailOrder ? <OrderDetailModal type="outbound" order={detailOrder} onClose={() => setDetailOrder(null)} /> : null}
+    </>
+  );
+}
+
+function PackingPage() {
+  const [shippingReview, setShippingReview] = useState<OutboundOrder | null>(null);
+  const [detailOrder, setDetailOrder] = useState<OutboundOrder | null>(null);
+  const orders = useLoad(() => wmsApi.outbound(), []);
+  const packingOrders = (orders.data ?? []).filter((order) => ['PACKING', 'DISPATCHED'].includes(order.status));
+  const ship = async (order: OutboundOrder) => {
+    try {
+      await wmsApi.shipOutbound(order.id);
+      toast.success('Envio confirmado');
+      setShippingReview(null);
+      orders.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo confirmar el envio');
+    }
+  };
+  const cancel = async (order: OutboundOrder) => {
+    try {
+      await wmsApi.cancelOutbound(order.id);
+      toast.success('Orden cancelada y stock liberado');
+      orders.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cancelar la orden');
+    }
+  };
+
+  return (
+    <>
+      <PageTitle title="Packing" subtitle="Separe el material recogido por picking y confirme el envio final" />
+      <div className="wms-grid cols-3 mb-5">
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Ordenes en packing</div><div className="mt-2 text-3xl font-extrabold">{packingOrders.length}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Lineas por separar</div><div className="mt-2 text-3xl font-extrabold">{packingOrders.reduce((sum, order) => sum + order.items.length, 0)}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Unidades recogidas</div><div className="mt-2 text-3xl font-extrabold">{packingOrders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0)}</div></div>
+      </div>
+      <div className="wms-card">
+        <DataTable
+          data={packingOrders}
+          columns={[
+            { header: 'Despacho', accessorKey: 'orderNo' },
+            { header: 'Cliente', cell: ({ row }) => row.original.client.name },
+            { header: 'Bodega', cell: ({ row }) => row.original.warehouse.name },
+            { header: 'Estado', cell: ({ row }) => <Badge value={row.original.status} /> },
+            { header: 'Contenido', cell: ({ row }) => row.original.items.map((item) => `${item.product?.sku} x${item.quantity}`).join(', ') },
+            { header: 'Fecha picking', cell: ({ row }) => row.original.confirmedAt ? new Date(row.original.confirmedAt).toLocaleString() : '-' },
+            {
+              header: 'Acciones',
+              cell: ({ row }) => (
+                <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
+                  <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
+                    <FileDown size={16} /> PDF
+                  </button>
+                  <button className="wms-button" onClick={() => downloadOutboundLabels(row.original)}>
+                    <Printer size={16} /> Etiquetas
+                  </button>
+                  <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
+                    Revisar
+                  </button>
+                  <button className="wms-button primary" onClick={() => setShippingReview(row.original)}>
+                    Enviar
+                  </button>
+                  <button className="wms-button danger" onClick={() => cancel(row.original)}>
+                    Cancelar
+                  </button>
+                </div>
+              ),
+            },
+          ]}
+          onRowClick={(order) => setDetailOrder(order)}
+        />
+        {!packingOrders.length ? <div className="wms-card-body text-sm text-slate-500">No hay material recogido pendiente de packing.</div> : null}
+      </div>
       {shippingReview ? (
         <ShipmentReview
           order={shippingReview}
           onClose={() => setShippingReview(null)}
-          onSend={() => action(wmsApi.shipOutbound(shippingReview.id), 'Envio confirmado').then(() => setShippingReview(null))}
+          onSend={() => ship(shippingReview)}
           onEdit={() => {
-            action(wmsApi.cancelOutbound(shippingReview.id), 'Despacho liberado para edicion').then(() => {
-              setPrefillOrder(shippingReview);
-              setShippingReview(null);
-              setCreating(true);
-            });
+            setDetailOrder(shippingReview);
+            setShippingReview(null);
           }}
         />
       ) : null}
@@ -3621,7 +3729,7 @@ function PickingPage() {
     if (!ids.length) return toast.error('No hay despachos para procesar');
     try {
       await wmsApi.completePicking(ids, 'dispatch');
-      toast.success('Picking finalizado y despachos pasados a Despachado');
+      toast.success('Picking finalizado y despachos enviados a Packing');
       setSelectedIds([]);
       setActiveIds([]);
       setPickedKeys([]);
@@ -3889,17 +3997,17 @@ function OrdersTable({
                     Editar
                   </button>
                 ) : null}
-                {type === 'outbound' && row.original.status === 'DISPATCHED' ? (
+                {type === 'outbound' && onShip && ['PACKING', 'DISPATCHED'].includes(row.original.status) ? (
                   <button className="wms-button primary" onClick={() => onShip?.(row.original.id)}>
                     Enviar
                   </button>
                 ) : null}
-                {['DRAFT', 'PENDING', 'RESERVED'].includes(row.original.status) ? (
+                {((type === 'inbound' && ['DRAFT', 'PENDING'].includes(row.original.status)) || (type === 'outbound' && row.original.status === 'DRAFT')) ? (
                   <button className="wms-button primary" onClick={() => onConfirm(row.original.id)}>
-                    {type === 'outbound' ? 'Finalizar despacho' : 'Confirmar'}
+                    {type === 'outbound' ? 'Generar despacho' : 'Confirmar'}
                   </button>
                 ) : null}
-                {['DRAFT', 'PENDING', 'RESERVED', 'DISPATCHED'].includes(row.original.status) && row.original.status !== 'SHIPPED' ? (
+                {['DRAFT', 'PENDING', 'RESERVED', 'PACKING', 'DISPATCHED'].includes(row.original.status) && row.original.status !== 'SHIPPED' ? (
                   <button className="wms-button danger" onClick={() => onCancel(row.original.id)}>
                     Cancelar
                   </button>
