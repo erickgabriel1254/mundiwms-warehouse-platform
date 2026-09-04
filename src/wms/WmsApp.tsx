@@ -39,6 +39,7 @@ import { useForm } from 'react-hook-form';
 import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import QRCode from 'qrcode';
 import { z } from 'zod';
 import { clearToken, downloadCsv, getCompanyId, setCompanyId as persistCompanyId, setToken, wmsApi } from './api';
 import type {
@@ -2341,7 +2342,7 @@ function WarehousesPage() {
                               <td>{location.pickSequence || '-'}</td>
                               <td>{stats.total ? `${stats.total} unid.` : <span className="text-emerald-700 font-bold">Libre</span>}</td>
                               <td>
-                                <div className="wms-actions">
+                                <div className="wms-actions wms-location-row-actions">
                                   <button className="wms-button" onClick={() => void printLocationLabelDirect(location)}>
                                     <Printer size={15} /> Imprimir
                                   </button>
@@ -3104,11 +3105,15 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
   );
 }
 
-function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | OutboundOrder) {
+async function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | OutboundOrder) {
   const party = 'supplier' in order ? order.supplier : order.client;
-  const rows = order.items
-    .map((item) => {
+  const popup = window.open('', '_blank', 'width=900,height=700');
+  if (!popup) return toast.error('El navegador bloqueo la ventana del PDF');
+  const rows = await Promise.all(
+    order.items.map(async (item) => {
       const unitCost = Number(item.unitCost ?? item.product?.purchasePrice ?? 0);
+      const dispatchCode = `${order.orderNo}-${item.product?.sku ?? 'SKU'}`;
+      const qr = type === 'outbound' ? await QRCode.toDataURL(dispatchCode, { width: 220, margin: 1, errorCorrectionLevel: 'M' }) : '';
       return `
         <tr>
           <td>${item.product?.sku ?? '-'}</td>
@@ -3116,14 +3121,12 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
           <td>${item.quantity}</td>
           ${type === 'inbound' ? `<td>$${unitCost.toFixed(2)}</td><td>$${(unitCost * item.quantity).toFixed(2)}</td>` : ''}
           ${type === 'inbound' ? `<td>${item.lotNumber || '-'}</td><td>${formatDateOnly(item.expirationDate)}</td>` : ''}
-          ${type === 'outbound' ? `<td><div class="print-barcode">${barcodeSvg(`${order.orderNo}-${item.product?.sku ?? 'SKU'}`)}<small>${htmlSafe(`${order.orderNo}-${item.product?.sku ?? 'SKU'}`)}</small></div></td>` : ''}
+          ${type === 'outbound' ? `<td><div class="print-qr"><img src="${qr}" alt="${htmlSafe(dispatchCode)}" /><small>${htmlSafe(dispatchCode)}</small></div></td>` : ''}
           <td>${item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
         </tr>
       `;
-    })
-    .join('');
-  const popup = window.open('', '_blank', 'width=900,height=700');
-  if (!popup) return toast.error('El navegador bloqueo la ventana del PDF');
+    }),
+  ).then((items) => items.join(''));
   popup.document.write(`
     <!doctype html>
     <html>
@@ -3136,8 +3139,9 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
           table { width: 100%; border-collapse: collapse; margin-top: 20px; }
           th, td { border: 1px solid #d1d5db; padding: 9px 10px; text-align: left; font-size: 13px; }
           th { background: #f3f4f6; text-transform: uppercase; }
-          .print-barcode { min-width: 150px; }
-          .print-barcode small { display: block; margin-top: 4px; font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-align: center; }
+          .print-qr { min-width: 132px; text-align: center; }
+          .print-qr img { width: 112px; height: 112px; image-rendering: pixelated; }
+          .print-qr small { display: block; margin-top: 4px; font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-align: center; }
         </style>
       </head>
       <body>
@@ -3767,7 +3771,7 @@ function PackingPage() {
               header: 'Acciones',
               cell: ({ row }) => (
                 <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
-                  <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
+                  <button className="wms-button" onClick={() => void printOrderPdf('outbound', row.original)}>
                     <FileDown size={16} /> PDF
                   </button>
                   <button className="wms-button" onClick={() => void printOutboundLabelsDirect(row.original)}>
@@ -3853,7 +3857,7 @@ function ShippingPage() {
               header: 'Acciones',
               cell: ({ row }) => (
                 <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
-                  <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
+                  <button className="wms-button" onClick={() => void printOrderPdf('outbound', row.original)}>
                     <FileDown size={16} /> PDF
                   </button>
                   <button className="wms-button" onClick={() => void printOutboundLabelsDirect(row.original)}>
@@ -4227,9 +4231,9 @@ function generateOutboundZpl(order: OutboundOrder) {
 ^FO30,138^A0N,24,24^FD${name}^FS
 ^FO30,174^A0N,24,24^FDCantidad: ${item.quantity}^FS
 ^FO30,208^A0N,24,24^FDSerie/Lote: ${zplSafe(serial)}^FS
-^BY2,2,72
-^FO30,248^BCN,72,Y,N,N^FD${code}^FS
-^FO470,24^A0N,22,22^FD${index + 1}/${order.items.length}^FS
+^FO360,64^BQN,2,8^FDLA,${code}^FS
+^FO30,268^A0N,24,24^FDQR: ${code}^FS
+^FO500,24^A0N,22,22^FD${index + 1}/${order.items.length}^FS
 ^XZ`;
         })
         .join('\n');
@@ -4252,7 +4256,7 @@ function downloadOutboundLabels(order: OutboundOrder) {
   toast.success('Etiquetas ZPL generadas');
 }
 
-async function printZplWithFallback(zpl: string, fallback: () => void, successMessage: string) {
+async function printZplWithFallback(zpl: string, fallback: () => void | Promise<void>, successMessage: string) {
   try {
     toast.info('Conectando con QZ Tray...');
     const qzModule = await import('qz-tray');
@@ -4268,7 +4272,7 @@ async function printZplWithFallback(zpl: string, fallback: () => void, successMe
   } catch (error) {
     console.warn('QZ Tray no disponible, usando impresion del navegador', error);
     toast.error('QZ Tray no esta disponible; se abrira la impresion del navegador');
-    fallback();
+    await fallback();
   }
 }
 
@@ -4280,17 +4284,27 @@ type BrowserLabel = {
   title: string;
   eyebrow: string;
   code: string;
+  codeType?: 'barcode' | 'qr';
   lines: string[];
   footerLeft: string;
   footerRight: string;
 };
 
-function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
+async function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
   const popup = window.open('', '_blank', 'width=480,height=720');
   if (!popup) {
     toast.error('El navegador bloqueo la impresion de etiquetas');
     return;
   }
+  const preparedLabels = await Promise.all(
+    labels.map(async (label) => ({
+      ...label,
+      codeMarkup:
+        label.codeType === 'qr'
+          ? `<img class="qr-code" src="${await QRCode.toDataURL(label.code, { width: 190, margin: 1, errorCorrectionLevel: 'M' })}" alt="${htmlSafe(label.code)}" />`
+          : barcodeSvg(label.code, 46),
+    })),
+  );
   popup.document.write(`
     <!doctype html>
     <html>
@@ -4316,6 +4330,8 @@ function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
           .line { font-size: 11px; font-weight: 700; }
           .product { font-size: 13px; font-weight: 800; line-height: 1.15; }
           .barcode { height: 16mm; border: 1px solid #111827; padding: 2mm; margin-top: auto; }
+          .qr-label .barcode { height: 27mm; padding: 1mm; display: flex; align-items: center; justify-content: center; }
+          .qr-code { width: 25mm; height: 25mm; image-rendering: pixelated; }
           .barcode-text {
             font-family: "Courier New", monospace;
             font-size: 10px;
@@ -4327,8 +4343,8 @@ function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
         </style>
       </head>
       <body>
-        ${labels.map((label) => `
-          <section class="label">
+        ${preparedLabels.map((label) => `
+          <section class="label ${label.codeType === 'qr' ? 'qr-label' : ''}">
             <div class="top">
               <div>
                 <div class="muted">${htmlSafe(label.eyebrow)}</div>
@@ -4339,7 +4355,7 @@ function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
               ${label.lines.map((line) => `<div class="line">${htmlSafe(line)}</div>`).join('')}
             </div>
             <div>
-              <div class="barcode">${barcodeSvg(label.code, 46)}</div>
+              <div class="barcode">${label.codeMarkup}</div>
               <div class="barcode-text">${htmlSafe(label.code)}</div>
               <div class="footer"><span>${htmlSafe(label.footerLeft)}</span><span>${htmlSafe(label.footerRight)}</span></div>
             </div>
@@ -4354,13 +4370,14 @@ function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
   toast.success('Etiquetas enviadas a impresion');
 }
 
-function printOutboundLabels(order: OutboundOrder) {
+async function printOutboundLabels(order: OutboundOrder) {
   const labels = order.items.flatMap((item, index) => {
     const serials = item.serialNumbers.length ? item.serialNumbers : [`QTY-${item.quantity}`];
     return serials.map((serial, serialIndex) => ({
       title: order.orderNo,
       eyebrow: `Despacho ${index + 1}/${order.items.length}`,
       code: `${order.orderNo}-${item.product?.sku ?? 'SKU'}-${serialIndex + 1}`,
+      codeType: 'qr' as const,
       lines: [
         `Cliente: ${order.client.name}`,
         `SKU: ${item.product?.sku ?? '-'}`,
@@ -4371,7 +4388,7 @@ function printOutboundLabels(order: OutboundOrder) {
       footerRight: new Date().toLocaleDateString(),
     }));
   });
-  printBrowserLabels(`Etiquetas ${order.orderNo}`, labels);
+  await printBrowserLabels(`Etiquetas ${order.orderNo}`, labels);
 }
 
 function generateProductZpl(product: Product) {
@@ -4381,25 +4398,21 @@ function generateProductZpl(product: Product) {
 ^PW600
 ^LL360
 ^FO30,24^A0N,34,34^FD${zplSafe(product.sku)}^FS
-^FO30,68^A0N,24,24^FD${zplSafe(product.name)}^FS
-^FO30,104^A0N,22,22^FDMarca: ${zplSafe(product.brand || '-')}^FS
-^FO30,134^A0N,22,22^FDCategoria: ${zplSafe(product.category || '-')}^FS
-^FO30,164^A0N,20,20^FD${zplSafe(product.description || '-')}^FS
+^FO30,74^A0N,28,28^FD${zplSafe(product.name)}^FS
+^FO30,130^A0N,24,24^FDCodigo: ${code}^FS
 ^BY2,2,92
 ^FO30,220^BCN,92,Y,N,N^FD${code}^FS
 ^XZ`;
 }
 
-function printProductLabel(product: Product) {
-  printBrowserLabels(`Producto ${product.sku}`, [{
+async function printProductLabel(product: Product) {
+  await printBrowserLabels(`Producto ${product.sku}`, [{
     title: product.sku,
     eyebrow: 'Producto',
     code: product.barcode || product.sku,
     lines: [
       product.name,
-      `Marca: ${product.brand || '-'}`,
-      `Categoria: ${product.category || '-'}`,
-      `Descripcion: ${product.description || '-'}`,
+      `Codigo: ${product.barcode || product.sku}`,
     ],
     footerLeft: product.managesSerial ? 'Control por serie' : 'Control por cantidad',
     footerRight: product.unit || 'Unidad',
@@ -4425,8 +4438,8 @@ function generateLocationZpl(location: Location) {
 ^XZ`;
 }
 
-function printLocationLabel(location: Location) {
-  printBrowserLabels(`Ubicacion ${location.code}`, [{
+async function printLocationLabel(location: Location) {
+  await printBrowserLabels(`Ubicacion ${location.code}`, [{
     title: location.code || locationLayoutCode(location),
     eyebrow: 'Ubicacion bodega',
     code: location.code || locationLayoutCode(location),
@@ -4479,7 +4492,7 @@ function OrdersTable({
             header: 'Acciones',
             cell: ({ row }) => (
               <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
-                <button className="wms-button" onClick={() => printOrderPdf(type, row.original)}>
+                <button className="wms-button" onClick={() => void printOrderPdf(type, row.original)}>
                   <FileDown size={16} /> PDF
                 </button>
                 {type === 'outbound' ? (
