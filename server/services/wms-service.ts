@@ -75,9 +75,15 @@ const roleSchema = z.object({
   permissions: z.array(z.string().trim().min(1)).default([]),
 });
 
+const userEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[^\s@]+@[^\s@]+(?:\.[^\s@]+)*$/, 'Correo invalido');
+
 const userSchema = z.object({
   name: z.string().trim().min(3),
-  email: z.string().trim().email(),
+  email: userEmailSchema,
   password: z.string().min(6).optional().or(z.literal('')),
   roleId: z.string().min(1),
   isActive: z.boolean().default(true),
@@ -310,7 +316,7 @@ function normalizeCategoryCode(value: string) {
 }
 
 export async function login(body: unknown) {
-  const data = z.object({ email: z.string().email(), password: z.string().min(1) }).parse(body);
+  const data = z.object({ email: userEmailSchema, password: z.string().min(1) }).parse(body);
   const user = await prisma.user.findUnique({ where: { email: data.email }, include: { role: true } });
   if (!user || !user.isActive || !verifyPassword(data.password, user.passwordHash)) {
     throw new Error('Credenciales invalidas');
