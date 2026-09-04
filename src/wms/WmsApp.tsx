@@ -4131,13 +4131,20 @@ function PickingPage() {
   );
 }
 
-function zplSafe(value: string) {
-  return value.replace(/[\^~]/g, ' ').slice(0, 42);
+function zplSafe(value: string, maxLength = 42) {
+  return value.replace(/[\^~]/g, ' ').slice(0, maxLength);
 }
 
 function htmlSafe(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char] ?? char);
 }
+
+const LABEL_WIDTH_MM = 51;
+const LABEL_HEIGHT_MM = 25;
+const LABEL_GAP_MM = 5;
+const ZEBRA_DPI = 203;
+const LABEL_WIDTH_DOTS = Math.round((LABEL_WIDTH_MM / 25.4) * ZEBRA_DPI);
+const LABEL_HEIGHT_DOTS = Math.round((LABEL_HEIGHT_MM / 25.4) * ZEBRA_DPI);
 
 const code39Patterns: Record<string, string> = {
   '0': 'nnnwwnwnn',
@@ -4225,17 +4232,16 @@ function generateOutboundZpl(order: OutboundOrder) {
           const code = zplSafe(`${order.orderNo}-${sku}-${serialIndex + 1}`);
           return `^XA
 ^CI28
-^PW600
-^LL360
-^FO30,24^A0N,34,34^FD${zplSafe(order.orderNo)}^FS
-^FO30,68^A0N,24,24^FDCliente: ${client}^FS
-^FO30,104^A0N,24,24^FDSKU: ${sku}^FS
-^FO30,138^A0N,24,24^FD${name}^FS
-^FO30,174^A0N,24,24^FDCantidad: ${item.quantity}^FS
-^FO30,208^A0N,24,24^FDSerie/Lote: ${zplSafe(serial)}^FS
-^FO360,64^BQN,2,8^FDLA,${code}^FS
-^FO30,268^A0N,24,24^FDQR: ${code}^FS
-^FO500,24^A0N,22,22^FD${index + 1}/${order.items.length}^FS
+^PW${LABEL_WIDTH_DOTS}
+^LL${LABEL_HEIGHT_DOTS}
+^LH0,0
+^FO14,10^A0N,24,24^FD${zplSafe(order.orderNo, 24)}^FS
+^FO14,38^A0N,17,17^FDCliente: ${zplSafe(client, 24)}^FS
+^FO14,62^A0N,18,18^FDSKU: ${zplSafe(sku, 24)}^FS
+^FO14,86^A0N,16,16^FB250,2,1,L,0^FD${zplSafe(name, 44)}^FS
+^FO14,136^A0N,17,17^FDCant: ${item.quantity} Serie/Lote: ${zplSafe(serial, 18)}^FS
+^FO284,28^BQN,2,4^FDLA,${code}^FS
+^FO350,10^A0N,17,17^FD${index + 1}/${order.items.length}^FS
 ^XZ`;
         })
         .join('\n');
@@ -4293,7 +4299,7 @@ type BrowserLabel = {
 };
 
 async function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
-  const popup = window.open('', '_blank', 'width=480,height=720');
+  const popup = window.open('', '_blank', 'width=320,height=260');
   if (!popup) {
     toast.error('El navegador bloqueo la impresion de etiquetas');
     return;
@@ -4313,34 +4319,52 @@ async function printBrowserLabels(documentTitle: string, labels: BrowserLabel[])
       <head>
         <title>${htmlSafe(documentTitle)}</title>
         <style>
-          @page { size: 100mm 60mm; margin: 0; }
+          @page { size: ${LABEL_WIDTH_MM}mm ${LABEL_HEIGHT_MM}mm; margin: 0; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, sans-serif; color: #111827; }
+          html, body {
+            width: ${LABEL_WIDTH_MM}mm;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            color: #111827;
+          }
           .label {
-            width: 100mm;
-            height: 60mm;
-            padding: 6mm;
+            width: ${LABEL_WIDTH_MM}mm;
+            height: ${LABEL_HEIGHT_MM}mm;
+            padding: 2mm;
             page-break-after: always;
             display: flex;
             flex-direction: column;
-            gap: 2mm;
+            gap: 0.7mm;
             border: 1px solid #e5e7eb;
+            overflow: hidden;
           }
-          .top { display: flex; justify-content: space-between; gap: 4mm; align-items: flex-start; }
-          .order { font-size: 18px; font-weight: 800; }
-          .muted { color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-          .line { font-size: 11px; font-weight: 700; }
-          .product { font-size: 13px; font-weight: 800; line-height: 1.15; }
-          .barcode { height: 16mm; border: 1px solid #111827; padding: 2mm; margin-top: auto; }
-          .qr-label .barcode { height: 27mm; padding: 1mm; display: flex; align-items: center; justify-content: center; }
-          .qr-code { width: 25mm; height: 25mm; image-rendering: pixelated; }
+          .top { display: flex; justify-content: space-between; gap: 2mm; align-items: flex-start; min-height: 5mm; }
+          .order { font-size: 10px; font-weight: 800; line-height: 1.05; }
+          .muted { color: #6b7280; font-size: 6px; font-weight: 700; line-height: 1; text-transform: uppercase; }
+          .line {
+            max-height: 3.8mm;
+            overflow: hidden;
+            font-size: 7px;
+            font-weight: 700;
+            line-height: 1.05;
+          }
+          .barcode { height: 8mm; border: 1px solid #111827; padding: 0.7mm; margin-top: auto; }
+          .qr-label .barcode { height: 12.5mm; padding: 0.4mm; display: flex; align-items: center; justify-content: center; }
+          .qr-code { width: 11.8mm; height: 11.8mm; image-rendering: pixelated; }
           .barcode-text {
             font-family: "Courier New", monospace;
-            font-size: 10px;
+            font-size: 5.8px;
             font-weight: 800;
             text-align: center;
+            line-height: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
-          .footer { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; }
+          .footer { display: flex; justify-content: space-between; gap: 2mm; font-size: 5.5px; font-weight: 700; line-height: 1; }
+          .footer span { max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          /* Separacion fisica esperada entre etiquetas del rollo: ${LABEL_GAP_MM}mm. */
           @media print { .label { border: 0; } }
         </style>
       </head>
@@ -4397,13 +4421,14 @@ function generateProductZpl(product: Product) {
   const code = zplSafe(product.barcode || product.sku);
   return `^XA
 ^CI28
-^PW600
-^LL360
-^FO30,24^A0N,34,34^FD${zplSafe(product.sku)}^FS
-^FO30,74^A0N,28,28^FD${zplSafe(product.name)}^FS
-^FO30,130^A0N,24,24^FDCodigo: ${code}^FS
-^BY2,2,92
-^FO30,220^BCN,92,Y,N,N^FD${code}^FS
+^PW${LABEL_WIDTH_DOTS}
+^LL${LABEL_HEIGHT_DOTS}
+^LH0,0
+^FO16,10^A0N,24,24^FD${zplSafe(product.sku, 26)}^FS
+^FO16,40^A0N,18,18^FB376,2,1,L,0^FD${zplSafe(product.name, 54)}^FS
+^FO16,84^A0N,16,16^FDCodigo: ${zplSafe(code, 30)}^FS
+^BY2,2,54
+^FO16,118^BCN,54,Y,N,N^FD${code}^FS
 ^XZ`;
 }
 
@@ -4429,14 +4454,15 @@ function generateLocationZpl(location: Location) {
   const code = zplSafe(location.code || locationLayoutCode(location));
   return `^XA
 ^CI28
-^PW600
-^LL360
-^FO30,24^A0N,34,34^FD${code}^FS
-^FO30,68^A0N,24,24^FD${zplSafe(location.name || '-')}^FS
-^FO30,104^A0N,22,22^FDZona ${zplSafe(location.zone || '-')} / Pasillo ${zplSafe(location.aisle || '-')}^FS
-^FO30,134^A0N,22,22^FDRack ${zplSafe(location.rack || '-')} / Nivel ${zplSafe(location.level || '-')} / Pos. ${zplSafe(location.position || '-')}^FS
-^BY2,2,102
-^FO30,204^BCN,102,Y,N,N^FD${code}^FS
+^PW${LABEL_WIDTH_DOTS}
+^LL${LABEL_HEIGHT_DOTS}
+^LH0,0
+^FO16,10^A0N,24,24^FD${zplSafe(code, 28)}^FS
+^FO16,38^A0N,16,16^FB376,2,1,L,0^FD${zplSafe(location.name || '-', 54)}^FS
+^FO16,78^A0N,16,16^FDZona ${zplSafe(location.zone || '-', 10)} / Pasillo ${zplSafe(location.aisle || '-', 10)}^FS
+^FO16,100^A0N,16,16^FDRack ${zplSafe(location.rack || '-', 8)} / Nivel ${zplSafe(location.level || '-', 8)} / Pos. ${zplSafe(location.position || '-', 8)}^FS
+^BY2,2,48
+^FO16,128^BCN,48,Y,N,N^FD${code}^FS
 ^XZ`;
 }
 
