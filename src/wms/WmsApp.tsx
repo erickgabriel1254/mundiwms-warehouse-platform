@@ -727,6 +727,9 @@ function ProductsPage() {
                       <td><Badge value={product.status} /></td>
                       <td>
                         <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
+                          <button className="wms-button" onClick={() => void printProductLabelDirect(product)}>
+                            <Printer size={16} /> Imprimir
+                          </button>
                           <button className="wms-button" onClick={() => setEditing(product)}>
                             Editar
                           </button>
@@ -2339,6 +2342,9 @@ function WarehousesPage() {
                               <td>{stats.total ? `${stats.total} unid.` : <span className="text-emerald-700 font-bold">Libre</span>}</td>
                               <td>
                                 <div className="wms-actions">
+                                  <button className="wms-button" onClick={() => void printLocationLabelDirect(location)}>
+                                    <Printer size={15} /> Imprimir
+                                  </button>
                                   <button className="wms-button" onClick={() => setEditingLocation({ location })}>Editar</button>
                                   <button className="wms-button danger" onClick={() => removeLocation(location)}><Trash2 size={15} /></button>
                                 </div>
@@ -3110,6 +3116,7 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
           <td>${item.quantity}</td>
           ${type === 'inbound' ? `<td>$${unitCost.toFixed(2)}</td><td>$${(unitCost * item.quantity).toFixed(2)}</td>` : ''}
           ${type === 'inbound' ? `<td>${item.lotNumber || '-'}</td><td>${formatDateOnly(item.expirationDate)}</td>` : ''}
+          ${type === 'outbound' ? `<td><div class="print-barcode">${barcodeSvg(`${order.orderNo}-${item.product?.sku ?? 'SKU'}`)}<small>${htmlSafe(`${order.orderNo}-${item.product?.sku ?? 'SKU'}`)}</small></div></td>` : ''}
           <td>${item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
         </tr>
       `;
@@ -3129,6 +3136,8 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
           table { width: 100%; border-collapse: collapse; margin-top: 20px; }
           th, td { border: 1px solid #d1d5db; padding: 9px 10px; text-align: left; font-size: 13px; }
           th { background: #f3f4f6; text-transform: uppercase; }
+          .print-barcode { min-width: 150px; }
+          .print-barcode small { display: block; margin-top: 4px; font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-align: center; }
         </style>
       </head>
       <body>
@@ -3149,7 +3158,7 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
         <table>
           <thead>
             <tr>
-              <th>SKU</th><th>Descripcion</th><th>Cantidad</th>${type === 'inbound' ? '<th>Costo unit.</th><th>Total</th><th>Lote</th><th>Vence</th>' : ''}<th>Series</th>
+              <th>SKU</th><th>Descripcion</th><th>Cantidad</th>${type === 'inbound' ? '<th>Costo unit.</th><th>Total</th><th>Lote</th><th>Vence</th>' : ''}${type === 'outbound' ? '<th>Codigo barras</th>' : ''}<th>Series</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -4124,6 +4133,80 @@ function htmlSafe(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char] ?? char);
 }
 
+const code39Patterns: Record<string, string> = {
+  '0': 'nnnwwnwnn',
+  '1': 'wnnwnnnnw',
+  '2': 'nnwwnnnnw',
+  '3': 'wnwwnnnnn',
+  '4': 'nnnwwnnnw',
+  '5': 'wnnwwnnnn',
+  '6': 'nnwwwnnnn',
+  '7': 'nnnwnnwnw',
+  '8': 'wnnwnnwnn',
+  '9': 'nnwwnnwnn',
+  A: 'wnnnnwnnw',
+  B: 'nnwnnwnnw',
+  C: 'wnwnnwnnn',
+  D: 'nnnnwwnnw',
+  E: 'wnnnwwnnn',
+  F: 'nnwnwwnnn',
+  G: 'nnnnnwwnw',
+  H: 'wnnnnwwnn',
+  I: 'nnwnnwwnn',
+  J: 'nnnnwwwnn',
+  K: 'wnnnnnnww',
+  L: 'nnwnnnnww',
+  M: 'wnwnnnnwn',
+  N: 'nnnnwnnww',
+  O: 'wnnnwnnwn',
+  P: 'nnwnwnnwn',
+  Q: 'nnnnnnwww',
+  R: 'wnnnnnwwn',
+  S: 'nnwnnnwwn',
+  T: 'nnnnwnwwn',
+  U: 'wwnnnnnnw',
+  V: 'nwwnnnnnw',
+  W: 'wwwnnnnnn',
+  X: 'nwnnwnnnw',
+  Y: 'wwnnwnnnn',
+  Z: 'nwwnwnnnn',
+  '-': 'nwnnnnwnw',
+  '.': 'wwnnnnwnn',
+  ' ': 'nwwnnnwnn',
+  '$': 'nwnwnwnnn',
+  '/': 'nwnwnnnwn',
+  '+': 'nwnnnwnwn',
+  '%': 'nnnwnwnwn',
+  '*': 'nwnnwnwnn',
+};
+
+function normalizeCode39(value: string) {
+  return value
+    .toUpperCase()
+    .replace(/[^0-9A-Z .$%/+.-]/g, '-')
+    .slice(0, 48);
+}
+
+function barcodeSvg(value: string, height = 48) {
+  const content = `*${normalizeCode39(value || 'SIN-CODIGO')}*`;
+  const narrow = 2;
+  const wide = 5;
+  const quiet = 12;
+  let x = quiet;
+  const bars: string[] = [];
+  for (const char of content) {
+    const pattern = code39Patterns[char] ?? code39Patterns['-'];
+    pattern.split('').forEach((part, index) => {
+      const width = part === 'w' ? wide : narrow;
+      if (index % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${width}" height="${height}" fill="#111827" />`);
+      x += width;
+    });
+    x += narrow;
+  }
+  const width = x + quiet;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none" aria-label="${htmlSafe(value)}">${bars.join('')}</svg>`;
+}
+
 function generateOutboundZpl(order: OutboundOrder) {
   return order.items
     .map((item, index) => {
@@ -4169,7 +4252,7 @@ function downloadOutboundLabels(order: OutboundOrder) {
   toast.success('Etiquetas ZPL generadas');
 }
 
-async function printOutboundLabelsDirect(order: OutboundOrder) {
+async function printZplWithFallback(zpl: string, fallback: () => void, successMessage: string) {
   try {
     toast.info('Conectando con QZ Tray...');
     const qzModule = await import('qz-tray');
@@ -4180,30 +4263,29 @@ async function printOutboundLabelsDirect(order: OutboundOrder) {
     const printerName = printerFromSearch || await qz.printers.getDefault();
     if (!printerName) throw new Error('No se encontro una impresora configurada');
     const config = qz.configs.create(printerName, { encoding: 'UTF-8' });
-    await qz.print(config, [{ type: 'raw', format: 'command', flavor: 'plain', data: generateOutboundZpl(order) }]);
-    toast.success(`Etiquetas enviadas a ${printerName}`);
+    await qz.print(config, [{ type: 'raw', format: 'command', flavor: 'plain', data: zpl }]);
+    toast.success(`${successMessage}: ${printerName}`);
   } catch (error) {
     console.warn('QZ Tray no disponible, usando impresion del navegador', error);
     toast.error('QZ Tray no esta disponible; se abrira la impresion del navegador');
-    printOutboundLabels(order);
+    fallback();
   }
 }
 
-function printOutboundLabels(order: OutboundOrder) {
-  const labels = order.items.flatMap((item, index) => {
-    const serials = item.serialNumbers.length ? item.serialNumbers : [`QTY-${item.quantity}`];
-    return serials.map((serial, serialIndex) => ({
-      orderNo: order.orderNo,
-      client: order.client.name,
-      sku: item.product?.sku ?? '-',
-      name: item.product?.name ?? '-',
-      quantity: item.quantity,
-      serial,
-      code: `${order.orderNo}-${item.product?.sku ?? 'SKU'}-${serialIndex + 1}`,
-      index: index + 1,
-      total: order.items.length,
-    }));
-  });
+async function printOutboundLabelsDirect(order: OutboundOrder) {
+  await printZplWithFallback(generateOutboundZpl(order), () => printOutboundLabels(order), 'Etiquetas enviadas');
+}
+
+type BrowserLabel = {
+  title: string;
+  eyebrow: string;
+  code: string;
+  lines: string[];
+  footerLeft: string;
+  footerRight: string;
+};
+
+function printBrowserLabels(documentTitle: string, labels: BrowserLabel[]) {
   const popup = window.open('', '_blank', 'width=480,height=720');
   if (!popup) {
     toast.error('El navegador bloqueo la impresion de etiquetas');
@@ -4213,7 +4295,7 @@ function printOutboundLabels(order: OutboundOrder) {
     <!doctype html>
     <html>
       <head>
-        <title>Etiquetas ${htmlSafe(order.orderNo)}</title>
+        <title>${htmlSafe(documentTitle)}</title>
         <style>
           @page { size: 100mm 60mm; margin: 0; }
           * { box-sizing: border-box; }
@@ -4223,8 +4305,8 @@ function printOutboundLabels(order: OutboundOrder) {
             height: 60mm;
             padding: 6mm;
             page-break-after: always;
-            display: grid;
-            grid-template-rows: auto auto auto 1fr auto;
+            display: flex;
+            flex-direction: column;
             gap: 2mm;
             border: 1px solid #e5e7eb;
           }
@@ -4233,16 +4315,12 @@ function printOutboundLabels(order: OutboundOrder) {
           .muted { color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; }
           .line { font-size: 11px; font-weight: 700; }
           .product { font-size: 13px; font-weight: 800; line-height: 1.15; }
-          .barcode {
-            height: 16mm;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid #111827;
+          .barcode { height: 16mm; border: 1px solid #111827; padding: 2mm; margin-top: auto; }
+          .barcode-text {
             font-family: "Courier New", monospace;
-            font-size: 12px;
+            font-size: 10px;
             font-weight: 800;
-            letter-spacing: 1px;
+            text-align: center;
           }
           .footer { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; }
           @media print { .label { border: 0; } }
@@ -4253,23 +4331,17 @@ function printOutboundLabels(order: OutboundOrder) {
           <section class="label">
             <div class="top">
               <div>
-                <div class="muted">Despacho</div>
-                <div class="order">${htmlSafe(label.orderNo)}</div>
+                <div class="muted">${htmlSafe(label.eyebrow)}</div>
+                <div class="order">${htmlSafe(label.title)}</div>
               </div>
-              <div class="line">${label.index}/${label.total}</div>
-            </div>
-            <div class="line">Cliente: ${htmlSafe(label.client)}</div>
-            <div>
-              <div class="muted">SKU</div>
-              <div class="product">${htmlSafe(label.sku)}</div>
             </div>
             <div>
-              <div class="product">${htmlSafe(label.name)}</div>
-              <div class="line">Cantidad: ${label.quantity} | Serie/Lote: ${htmlSafe(label.serial)}</div>
+              ${label.lines.map((line) => `<div class="line">${htmlSafe(line)}</div>`).join('')}
             </div>
             <div>
-              <div class="barcode">${htmlSafe(label.code)}</div>
-              <div class="footer"><span>${htmlSafe(order.warehouse.name)}</span><span>${new Date().toLocaleDateString()}</span></div>
+              <div class="barcode">${barcodeSvg(label.code, 46)}</div>
+              <div class="barcode-text">${htmlSafe(label.code)}</div>
+              <div class="footer"><span>${htmlSafe(label.footerLeft)}</span><span>${htmlSafe(label.footerRight)}</span></div>
             </div>
           </section>
         `).join('')}
@@ -4280,6 +4352,97 @@ function printOutboundLabels(order: OutboundOrder) {
   popup.focus();
   popup.print();
   toast.success('Etiquetas enviadas a impresion');
+}
+
+function printOutboundLabels(order: OutboundOrder) {
+  const labels = order.items.flatMap((item, index) => {
+    const serials = item.serialNumbers.length ? item.serialNumbers : [`QTY-${item.quantity}`];
+    return serials.map((serial, serialIndex) => ({
+      title: order.orderNo,
+      eyebrow: `Despacho ${index + 1}/${order.items.length}`,
+      code: `${order.orderNo}-${item.product?.sku ?? 'SKU'}-${serialIndex + 1}`,
+      lines: [
+        `Cliente: ${order.client.name}`,
+        `SKU: ${item.product?.sku ?? '-'}`,
+        item.product?.name ?? '-',
+        `Cantidad: ${item.quantity} | Serie/Lote: ${serial}`,
+      ],
+      footerLeft: order.warehouse.name,
+      footerRight: new Date().toLocaleDateString(),
+    }));
+  });
+  printBrowserLabels(`Etiquetas ${order.orderNo}`, labels);
+}
+
+function generateProductZpl(product: Product) {
+  const code = zplSafe(product.barcode || product.sku);
+  return `^XA
+^CI28
+^PW600
+^LL360
+^FO30,24^A0N,34,34^FD${zplSafe(product.sku)}^FS
+^FO30,68^A0N,24,24^FD${zplSafe(product.name)}^FS
+^FO30,104^A0N,22,22^FDMarca: ${zplSafe(product.brand || '-')}^FS
+^FO30,134^A0N,22,22^FDCategoria: ${zplSafe(product.category || '-')}^FS
+^FO30,164^A0N,20,20^FD${zplSafe(product.description || '-')}^FS
+^BY2,2,92
+^FO30,220^BCN,92,Y,N,N^FD${code}^FS
+^XZ`;
+}
+
+function printProductLabel(product: Product) {
+  printBrowserLabels(`Producto ${product.sku}`, [{
+    title: product.sku,
+    eyebrow: 'Producto',
+    code: product.barcode || product.sku,
+    lines: [
+      product.name,
+      `Marca: ${product.brand || '-'}`,
+      `Categoria: ${product.category || '-'}`,
+      `Descripcion: ${product.description || '-'}`,
+    ],
+    footerLeft: product.managesSerial ? 'Control por serie' : 'Control por cantidad',
+    footerRight: product.unit || 'Unidad',
+  }]);
+}
+
+async function printProductLabelDirect(product: Product) {
+  await printZplWithFallback(generateProductZpl(product), () => printProductLabel(product), 'Etiqueta de producto enviada');
+}
+
+function generateLocationZpl(location: Location) {
+  const code = zplSafe(location.code || locationLayoutCode(location));
+  return `^XA
+^CI28
+^PW600
+^LL360
+^FO30,24^A0N,34,34^FD${code}^FS
+^FO30,68^A0N,24,24^FD${zplSafe(location.name || '-')}^FS
+^FO30,104^A0N,22,22^FDZona ${zplSafe(location.zone || '-')} / Pasillo ${zplSafe(location.aisle || '-')}^FS
+^FO30,134^A0N,22,22^FDRack ${zplSafe(location.rack || '-')} / Nivel ${zplSafe(location.level || '-')} / Pos. ${zplSafe(location.position || '-')}^FS
+^BY2,2,102
+^FO30,204^BCN,102,Y,N,N^FD${code}^FS
+^XZ`;
+}
+
+function printLocationLabel(location: Location) {
+  printBrowserLabels(`Ubicacion ${location.code}`, [{
+    title: location.code || locationLayoutCode(location),
+    eyebrow: 'Ubicacion bodega',
+    code: location.code || locationLayoutCode(location),
+    lines: [
+      location.name,
+      `Zona: ${location.zone || '-'}`,
+      `Pasillo: ${location.aisle || '-'}`,
+      `Rack: ${location.rack || '-'} | Nivel: ${location.level || '-'} | Posicion: ${location.position || '-'}`,
+    ],
+    footerLeft: location.warehouse?.name ?? 'Bodega',
+    footerRight: locationKindLabels[location.kind ?? 'STORAGE'] ?? 'Almacenamiento',
+  }]);
+}
+
+async function printLocationLabelDirect(location: Location) {
+  await printZplWithFallback(generateLocationZpl(location), () => printLocationLabel(location), 'Etiqueta de ubicacion enviada');
 }
 
 function OrdersTable({
