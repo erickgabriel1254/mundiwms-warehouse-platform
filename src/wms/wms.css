@@ -737,6 +737,26 @@
   text-align: center;
 }
 
+.wms-blueprint-axis {
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wms-blueprint-axis.corner {
+  grid-column: 1;
+  grid-row: 1;
+  background: transparent;
+}
+
+.wms-blueprint-axis.row {
+  min-width: 30px;
+}
+
 .wms-blueprint-slot span {
   font-size: 10px;
   font-weight: 900;
@@ -1001,6 +1021,96 @@
 .wms-rack-front-slot.reserved {
   border-color: #fde68a;
   background: #fffbeb;
+}
+
+.wms-location-builder {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.wms-location-builder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wms-location-builder-grid {
+  display: grid;
+  position: relative;
+  gap: 5px;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.wms-builder-axis {
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wms-builder-axis.corner {
+  grid-column: 1;
+  grid-row: 1;
+  background: transparent;
+}
+
+.wms-builder-cell {
+  z-index: 1;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.wms-builder-cell:hover {
+  border-color: var(--wms-primary);
+  color: var(--wms-primary-strong);
+}
+
+.wms-builder-existing {
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 4px;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.wms-builder-selected {
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  border: 2px solid var(--wms-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wms-primary) 16%, #ffffff);
+  padding: 4px;
+  color: var(--wms-primary-strong);
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
 }
 
 .wms-picking-order {
@@ -1472,6 +1582,10 @@
     overflow-x: visible;
     background-size: 28px 28px;
     padding: 8px;
+  }
+
+  .wms-blueprint-axis {
+    display: none;
   }
 
   .wms-blueprint-slot {

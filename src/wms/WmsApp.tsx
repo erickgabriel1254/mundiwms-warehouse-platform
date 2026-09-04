@@ -1790,17 +1790,24 @@ function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: War
   }
 
   if (hasBlueprint) {
-    const cols = Math.max(8, ...warehouseLocations.map((location) => (location.mapX ?? 0) + (location.mapW ?? 1) + 1));
-    const rows = Math.max(6, ...warehouseLocations.map((location) => (location.mapY ?? 0) + (location.mapH ?? 1) + 1));
+    const cols = Math.max(8, ...warehouseLocations.map((location) => (location.mapX ?? 0) + (location.mapW ?? 1)));
+    const rows = Math.max(6, ...warehouseLocations.map((location) => (location.mapY ?? 0) + (location.mapH ?? 1)));
     return (
       <>
         <div
           className="wms-location-blueprint"
           style={{
-            gridTemplateColumns: `repeat(${cols}, minmax(36px, 1fr))`,
-            gridTemplateRows: `repeat(${rows}, 42px)`,
+            gridTemplateColumns: `34px repeat(${cols}, minmax(42px, 1fr))`,
+            gridTemplateRows: `28px repeat(${rows}, 42px)`,
           }}
         >
+          <div className="wms-blueprint-axis corner" />
+          {Array.from({ length: cols }, (_, index) => (
+            <div className="wms-blueprint-axis" key={`col-${index}`}>C{index + 1}</div>
+          ))}
+          {Array.from({ length: rows }, (_, index) => (
+            <div className="wms-blueprint-axis row" key={`row-${index}`} style={{ gridColumn: 1, gridRow: index + 2 }}>F{index + 1}</div>
+          ))}
           {warehouseLocations.map((location) => {
             const stats = getLocationStats(location);
             const state = stats.total === 0 ? 'empty' : stats.reserved > 0 ? 'reserved' : 'filled';
@@ -1811,8 +1818,8 @@ function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: War
                 onClick={() => onEdit(location)}
                 title={`${location.name} - ${stats.total} unidades`}
                 style={{
-                  gridColumn: `${(location.mapX ?? 0) + 1} / span ${location.mapW ?? 1}`,
-                  gridRow: `${(location.mapY ?? 0) + 1} / span ${location.mapH ?? 1}`,
+                  gridColumn: `${(location.mapX ?? 0) + 2} / span ${Math.min(location.mapW ?? 1, 2)}`,
+                  gridRow: `${(location.mapY ?? 0) + 2} / span ${Math.min(location.mapH ?? 1, 2)}`,
                 }}
               >
                 <span>{location.code}</span>
@@ -1930,17 +1937,27 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
   const [rack, setRack] = useState(location?.rack ?? '');
   const [level, setLevel] = useState(location?.level ?? '');
   const [position, setPosition] = useState(location?.position ?? '');
-  const [mapX, setMapX] = useState(location?.mapX ?? 0);
-  const [mapY, setMapY] = useState(location?.mapY ?? 0);
-  const [mapW, setMapW] = useState(location?.mapW ?? 1);
-  const [mapH, setMapH] = useState(location?.mapH ?? 1);
+  const [mapX, setMapX] = useState(Math.max(0, location?.mapX ?? 0));
+  const [mapY, setMapY] = useState(Math.max(0, location?.mapY ?? 0));
+  const [mapW, setMapW] = useState(Math.min(2, Math.max(1, location?.mapW ?? 1)));
+  const [mapH, setMapH] = useState(Math.min(2, Math.max(1, location?.mapH ?? 1)));
   const [pickSequence, setPickSequence] = useState(location?.pickSequence ?? 0);
   const [kind, setKind] = useState(location?.kind ?? 'STORAGE');
+  const selectedWarehouseLocations = catalogs.locations.filter((item) => item.warehouseId === warehouseId && item.id !== location?.id);
+  const mapPreviewCols = Math.max(8, mapX + mapW, ...selectedWarehouseLocations.map((item) => (item.mapX ?? 0) + Math.min(item.mapW ?? 1, 2)));
+  const mapPreviewRows = Math.max(6, mapY + mapH, ...selectedWarehouseLocations.map((item) => (item.mapY ?? 0) + Math.min(item.mapH ?? 1, 2)));
+  const setSafeMapW = (value: number) => setMapW(Math.min(2, Math.max(1, value || 1)));
+  const setSafeMapH = (value: number) => setMapH(Math.min(2, Math.max(1, value || 1)));
+  const updateMapPosition = (x: number, y: number) => {
+    setMapX(Math.max(0, x));
+    setMapY(Math.max(0, y));
+    setPickSequence((y + 1) * 100 + (x + 1));
+  };
   const generatedCode = locationLayoutCode({ zone, aisle, rack, level, position, code });
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, mapX, mapY, mapW, mapH, pickSequence, kind }, location?.id);
+      await wmsApi.saveLocation({ warehouseId, code, name, zone, aisle, rack, level, position, mapX, mapY, mapW: Math.min(mapW, 2), mapH: Math.min(mapH, 2), pickSequence, kind }, location?.id);
       toast.success(location ? 'Ubicacion actualizada' : 'Ubicacion creada');
       onSaved();
     } catch (error) {
@@ -2008,24 +2025,85 @@ function LocationForm({ catalogs, location, defaultWarehouseId, onClose, onSaved
           <div className="wms-grid cols-4">
             <label className="wms-label">
               Columna X
-              <input className="wms-input" type="number" min={0} value={mapX} onChange={(event) => setMapX(Number(event.target.value))} />
+              <input className="wms-input" type="number" min={0} value={mapX} onChange={(event) => setMapX(Math.max(0, Number(event.target.value)))} />
             </label>
             <label className="wms-label">
               Fila Y
-              <input className="wms-input" type="number" min={0} value={mapY} onChange={(event) => setMapY(Number(event.target.value))} />
+              <input className="wms-input" type="number" min={0} value={mapY} onChange={(event) => setMapY(Math.max(0, Number(event.target.value)))} />
             </label>
             <label className="wms-label">
               Ancho
-              <input className="wms-input" type="number" min={1} max={6} value={mapW} onChange={(event) => setMapW(Number(event.target.value))} />
+              <input className="wms-input" type="number" min={1} max={2} value={mapW} onChange={(event) => setSafeMapW(Number(event.target.value))} />
             </label>
             <label className="wms-label">
               Alto
-              <input className="wms-input" type="number" min={1} max={6} value={mapH} onChange={(event) => setMapH(Number(event.target.value))} />
+              <input className="wms-input" type="number" min={1} max={2} value={mapH} onChange={(event) => setSafeMapH(Number(event.target.value))} />
             </label>
             <label className="wms-label col-span-full">
               Orden de picking
               <input className="wms-input" type="number" min={0} value={pickSequence} onChange={(event) => setPickSequence(Number(event.target.value))} />
             </label>
+          </div>
+          <div className="wms-location-builder">
+            <div className="wms-location-builder-toolbar">
+              <strong>Vista de creacion</strong>
+              <div className="wms-actions">
+                <button type="button" className="wms-button" onClick={() => setSafeMapW(mapW === 1 ? 2 : 1)}>Ancho {mapW}</button>
+                <button type="button" className="wms-button" onClick={() => setSafeMapH(mapH === 1 ? 2 : 1)}>Alto {mapH}</button>
+                <button type="button" className="wms-button" onClick={() => setPickSequence((mapY + 1) * 100 + (mapX + 1))}>Calcular ruta</button>
+              </div>
+            </div>
+            <div
+              className="wms-location-builder-grid"
+              style={{
+                gridTemplateColumns: `34px repeat(${mapPreviewCols}, minmax(30px, 1fr))`,
+                gridTemplateRows: `26px repeat(${mapPreviewRows}, 36px)`,
+              }}
+            >
+              <div className="wms-builder-axis corner" />
+              {Array.from({ length: mapPreviewCols }, (_, index) => (
+                <div className="wms-builder-axis" key={`builder-col-${index}`}>C{index + 1}</div>
+              ))}
+              {Array.from({ length: mapPreviewRows }, (_, index) => (
+                <div className="wms-builder-axis row" key={`builder-row-${index}`} style={{ gridColumn: 1, gridRow: index + 2 }}>F{index + 1}</div>
+              ))}
+              {selectedWarehouseLocations.map((item) => (
+                <div
+                  className="wms-builder-existing"
+                  key={item.id}
+                  title={item.name}
+                  style={{
+                    gridColumn: `${(item.mapX ?? 0) + 2} / span ${Math.min(item.mapW ?? 1, 2)}`,
+                    gridRow: `${(item.mapY ?? 0) + 2} / span ${Math.min(item.mapH ?? 1, 2)}`,
+                  }}
+                >
+                  {item.code}
+                </div>
+              ))}
+              {Array.from({ length: mapPreviewRows }, (_, y) =>
+                Array.from({ length: mapPreviewCols }, (_, x) => (
+                  <button
+                    type="button"
+                    className="wms-builder-cell"
+                    key={`cell-${x}-${y}`}
+                    onClick={() => updateMapPosition(x, y)}
+                    style={{ gridColumn: x + 2, gridRow: y + 2 }}
+                    title={`Fila ${y + 1}, Columna ${x + 1}`}
+                  >
+                    {x + 1}.{y + 1}
+                  </button>
+                )),
+              )}
+              <div
+                className="wms-builder-selected"
+                style={{
+                  gridColumn: `${mapX + 2} / span ${Math.min(mapW, 2)}`,
+                  gridRow: `${mapY + 2} / span ${Math.min(mapH, 2)}`,
+                }}
+              >
+                {code || generatedCode || 'Nueva'}
+              </div>
+            </div>
           </div>
         </div>
         <div className="col-span-full flex justify-end gap-2">
