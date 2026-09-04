@@ -204,10 +204,16 @@ export type OutboundOrder = {
   locationId: string;
   location: Location;
   purchaseOrder?: string | null;
+  carrierName?: string | null;
+  guideNumber?: string | null;
+  deliveryAddress?: string | null;
+  receiverName?: string | null;
+  shippingNotes?: string | null;
   status: OrderStatus;
   notes?: string;
   createdAt: string;
   confirmedAt?: string | null;
+  shippedAt?: string | null;
   createdBy?: AdminUser | null;
   items: OrderItem[];
 };

@@ -91,7 +91,9 @@ export const wmsApi = {
     }),
   reserveOutbound: (id: string) => api(`/outbound/${id}/reserve`, { method: 'POST' }),
   dispatchOutbound: (id: string) => api(`/outbound/${id}/dispatch`, { method: 'POST' }),
-  shipOutbound: (id: string) => api(`/outbound/${id}/ship`, { method: 'POST' }),
+  completePacking: (id: string) => api(`/outbound/${id}/packing`, { method: 'POST' }),
+  shipOutbound: (id: string, payload?: unknown) =>
+    api(`/outbound/${id}/ship`, { method: 'POST', body: JSON.stringify(payload ?? {}) }),
   cancelOutbound: (id: string) => api(`/outbound/${id}/cancel`, { method: 'POST' }),
   pickingPlan: (orderIds: string[] = []) =>
     api<import('./types').PickingPlan>(`/picking/plan${orderIds.length ? `?orders=${encodeURIComponent(orderIds.join(','))}` : ''}`),

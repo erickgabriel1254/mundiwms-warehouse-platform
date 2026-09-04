@@ -90,7 +90,7 @@ const statusLabels: Record<string, string> = {
   RESERVED: 'Reservado',
   PACKING: 'Packing',
   BLOCKED: 'Bloqueado',
-  DISPATCHED: 'Despachado',
+  DISPATCHED: 'Listo para envio',
   SHIPPED: 'Enviado',
   RETURNING: 'En devolucion',
   DRAFT: 'Borrador',
@@ -234,6 +234,7 @@ function AppShell() {
     ['/conteo-ciclico', 'Conteo ciclico', ClipboardList],
     ['/picking', 'Picking guiado', RouteIcon],
     ['/packing', 'Packing', PackagePlus],
+    ['/envio', 'Envio', Send],
     ['/pedidos', 'Generar pedido', ClipboardList],
     ['/recepcion', 'Recepcion', PackagePlus],
     ['/despacho', 'Despacho', Truck],
@@ -335,6 +336,7 @@ function AppShell() {
               <Route path="/conteo-ciclico" element={<CycleCountPage />} />
               <Route path="/picking" element={<PickingPage />} />
               <Route path="/packing" element={<PackingPage />} />
+              <Route path="/envio" element={<ShippingPage />} />
               <Route path="/pedidos" element={<ImportOrdersPage />} />
               <Route path="/recepcion" element={<InboundPage />} />
               <Route path="/despacho" element={<OutboundPage />} />
@@ -2827,14 +2829,14 @@ function OrderReview({
   );
 }
 
-function ShipmentReview({
+function PackingReview({
   order,
-  onSend,
+  onComplete,
   onEdit,
   onClose,
 }: {
   order: OutboundOrder;
-  onSend: () => void;
+  onComplete: () => void;
   onEdit: () => void;
   onClose: () => void;
 }) {
@@ -2865,10 +2867,10 @@ function ShipmentReview({
     const item = order.items[nextIndex];
     setPackedKeys((current) => [...current, lineKey(item, nextIndex)]);
     setScan('');
-    toast.success(`${item.product?.sku ?? 'SKU'} separado para envio`);
+    toast.success(`${item.product?.sku ?? 'SKU'} separado para packing`);
   };
   return (
-    <Modal title={`Packing y envio ${order.orderNo}`} onClose={onClose}>
+    <Modal title={`Packing ${order.orderNo}`} onClose={onClose}>
       <div className="wms-grid">
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
           <div className="font-extrabold">Cliente: {order.client.name}</div>
@@ -2911,10 +2913,129 @@ function ShipmentReview({
           </table>
         </div>
         <div className="wms-actions justify-end">
-          <button className="wms-button" onClick={onEdit}>Revisar detalle</button>
-          <button className="wms-button primary" onClick={onSend} disabled={!allPacked}>Confirmar envio</button>
+          <button type="button" className="wms-button" onClick={onEdit}>Revisar detalle</button>
+          <button type="button" className="wms-button primary" onClick={onComplete} disabled={!allPacked}>Finalizar packing</button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+function ShippingReview({
+  order,
+  onSend,
+  onEdit,
+  onClose,
+}: {
+  order: OutboundOrder;
+  onSend: (payload: {
+    carrierName: string;
+    guideNumber: string;
+    deliveryAddress: string;
+    receiverName: string;
+    shippingNotes: string;
+  }) => void;
+  onEdit: () => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    carrierName: order.carrierName ?? '',
+    guideNumber: order.guideNumber ?? '',
+    deliveryAddress: order.deliveryAddress ?? order.client.address ?? '',
+    receiverName: order.receiverName ?? order.client.contact ?? '',
+    shippingNotes: order.shippingNotes ?? '',
+  });
+  const updateField = (field: keyof typeof form, value: string) => setForm((current) => ({ ...current, [field]: value }));
+  return (
+    <Modal title={`Envio ${order.orderNo}`} onClose={onClose}>
+      <form
+        className="wms-grid"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSend(form);
+        }}
+      >
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+          <div className="font-extrabold">Cliente: {order.client.name}</div>
+          <div>Bodega origen: {order.warehouse.name}</div>
+          <div>Orden de compra: {order.purchaseOrder || '-'}</div>
+          <div>Documento: {order.orderNo}</div>
+        </div>
+        <div className="wms-form-grid">
+          <label>
+            Transportista
+            <input
+              className="wms-input"
+              value={form.carrierName}
+              onChange={(event) => updateField('carrierName', event.target.value)}
+              placeholder="Nombre del transportista"
+            />
+          </label>
+          <label>
+            Guia / tracking
+            <input
+              className="wms-input"
+              value={form.guideNumber}
+              onChange={(event) => updateField('guideNumber', event.target.value)}
+              placeholder="Numero de guia"
+            />
+          </label>
+          <label>
+            Persona que recibe
+            <input
+              className="wms-input"
+              value={form.receiverName}
+              onChange={(event) => updateField('receiverName', event.target.value)}
+              placeholder="Contacto de entrega"
+            />
+          </label>
+          <label className="wms-form-wide">
+            Direccion de entrega
+            <input
+              className="wms-input"
+              value={form.deliveryAddress}
+              onChange={(event) => updateField('deliveryAddress', event.target.value)}
+              placeholder="Direccion donde se entrega"
+            />
+          </label>
+          <label className="wms-form-wide">
+            Observacion de envio
+            <textarea
+              className="wms-input"
+              value={form.shippingNotes}
+              onChange={(event) => updateField('shippingNotes', event.target.value)}
+              placeholder="Notas para transporte o entrega"
+              rows={3}
+            />
+          </label>
+        </div>
+        <div className="wms-table-wrap">
+          <table className="wms-table compact">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Descripcion</th>
+                <th>Cantidad</th>
+                <th>Series</th>
+              </tr>
+            </thead>
+            <tbody>
+              {order.items.map((item) => (
+                <tr key={item.id ?? item.productId}>
+                  <td>{item.product?.sku}</td>
+                  <td>{item.product?.name}</td>
+                  <td>{item.quantity}</td>
+                  <td>{item.serialNumbers.length ? item.serialNumbers.join(', ') : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="wms-actions justify-end">
+          <button type="button" className="wms-button" onClick={onEdit}>Revisar detalle</button>
+          <button type="submit" className="wms-button primary">Confirmar envio</button>
+        </div>
+      </form>
     </Modal>
   );
 }
@@ -2936,7 +3057,11 @@ function OrderDetailModal({ type, order, onClose }: { type: 'inbound' | 'outboun
           <div><span>Fecha cierre</span><strong>{order.confirmedAt ? new Date(order.confirmedAt).toLocaleString() : '-'}</strong></div>
           {'carrierName' in order ? <div><span>Transportista</span><strong>{order.carrierName || '-'}</strong></div> : null}
           {'guideNumber' in order ? <div><span>Guia</span><strong>{order.guideNumber || '-'}</strong></div> : null}
+          {'receiverName' in order ? <div><span>Recibe</span><strong>{order.receiverName || '-'}</strong></div> : null}
+          {'deliveryAddress' in order ? <div><span>Direccion entrega</span><strong>{order.deliveryAddress || '-'}</strong></div> : null}
+          {'shippedAt' in order ? <div><span>Fecha envio</span><strong>{order.shippedAt ? new Date(order.shippedAt).toLocaleString() : '-'}</strong></div> : null}
           <div className="wms-detail-wide"><span>Observacion</span><strong>{order.notes || '-'}</strong></div>
+          {'shippingNotes' in order ? <div className="wms-detail-wide"><span>Observacion envio</span><strong>{order.shippingNotes || '-'}</strong></div> : null}
         </div>
         <div className="wms-table-wrap">
           <table className="wms-table compact">
@@ -3016,6 +3141,10 @@ function printOrderPdf(type: 'inbound' | 'outbound', order: InboundOrder | Outbo
           <div><strong>Orden de compra:</strong> ${order.purchaseOrder || '-'}</div>
           <div><strong>Usuario:</strong> ${order.createdBy?.name ?? '-'}</div>
           <div><strong>Fecha:</strong> ${new Date(order.createdAt).toLocaleString()}</div>
+          ${type === 'outbound' ? `<div><strong>Transportista:</strong> ${'carrierName' in order ? order.carrierName || '-' : '-'}</div>` : ''}
+          ${type === 'outbound' ? `<div><strong>Guia:</strong> ${'guideNumber' in order ? order.guideNumber || '-' : '-'}</div>` : ''}
+          ${type === 'outbound' ? `<div><strong>Recibe:</strong> ${'receiverName' in order ? order.receiverName || '-' : '-'}</div>` : ''}
+          ${type === 'outbound' ? `<div><strong>Direccion entrega:</strong> ${'deliveryAddress' in order ? order.deliveryAddress || '-' : '-'}</div>` : ''}
         </div>
         <table>
           <thead>
@@ -3583,18 +3712,18 @@ function OutboundPage() {
 }
 
 function PackingPage() {
-  const [shippingReview, setShippingReview] = useState<OutboundOrder | null>(null);
+  const [packingReview, setPackingReview] = useState<OutboundOrder | null>(null);
   const [detailOrder, setDetailOrder] = useState<OutboundOrder | null>(null);
   const orders = useLoad(() => wmsApi.outbound(), []);
-  const packingOrders = (orders.data ?? []).filter((order) => ['PACKING', 'DISPATCHED'].includes(order.status));
-  const ship = async (order: OutboundOrder) => {
+  const packingOrders = (orders.data ?? []).filter((order) => order.status === 'PACKING');
+  const completePacking = async (order: OutboundOrder) => {
     try {
-      await wmsApi.shipOutbound(order.id);
-      toast.success('Envio confirmado');
-      setShippingReview(null);
+      await wmsApi.completePacking(order.id);
+      toast.success('Packing finalizado; orden lista para envio');
+      setPackingReview(null);
       orders.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudo confirmar el envio');
+      toast.error(error instanceof Error ? error.message : 'No se pudo finalizar packing');
     }
   };
   const cancel = async (order: OutboundOrder) => {
@@ -3609,7 +3738,7 @@ function PackingPage() {
 
   return (
     <>
-      <PageTitle title="Packing" subtitle="Separe el material recogido por picking y confirme el envio final" />
+      <PageTitle title="Packing" subtitle="Separe el material recogido por picking y dejelo listo para envio" />
       <div className="wms-grid cols-3 mb-5">
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Ordenes en packing</div><div className="mt-2 text-3xl font-extrabold">{packingOrders.length}</div></div>
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Lineas por separar</div><div className="mt-2 text-3xl font-extrabold">{packingOrders.reduce((sum, order) => sum + order.items.length, 0)}</div></div>
@@ -3638,8 +3767,8 @@ function PackingPage() {
                   <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
                     Revisar
                   </button>
-                  <button className="wms-button primary" onClick={() => setShippingReview(row.original)}>
-                    Enviar
+                  <button className="wms-button primary" onClick={() => setPackingReview(row.original)}>
+                    Packing
                   </button>
                   <button className="wms-button danger" onClick={() => cancel(row.original)}>
                     Cancelar
@@ -3652,11 +3781,97 @@ function PackingPage() {
         />
         {!packingOrders.length ? <div className="wms-card-body text-sm text-slate-500">No hay material recogido pendiente de packing.</div> : null}
       </div>
+      {packingReview ? (
+        <PackingReview
+          order={packingReview}
+          onClose={() => setPackingReview(null)}
+          onComplete={() => completePacking(packingReview)}
+          onEdit={() => {
+            setDetailOrder(packingReview);
+            setPackingReview(null);
+          }}
+        />
+      ) : null}
+      {detailOrder ? <OrderDetailModal type="outbound" order={detailOrder} onClose={() => setDetailOrder(null)} /> : null}
+    </>
+  );
+}
+
+function ShippingPage() {
+  const [shippingReview, setShippingReview] = useState<OutboundOrder | null>(null);
+  const [detailOrder, setDetailOrder] = useState<OutboundOrder | null>(null);
+  const orders = useLoad(() => wmsApi.outbound(), []);
+  const shippingOrders = (orders.data ?? []).filter((order) => order.status === 'DISPATCHED');
+  const ship = async (order: OutboundOrder, payload: Parameters<typeof wmsApi.shipOutbound>[1]) => {
+    try {
+      await wmsApi.shipOutbound(order.id, payload);
+      toast.success('Envio confirmado');
+      setShippingReview(null);
+      orders.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo confirmar el envio');
+    }
+  };
+  const cancel = async (order: OutboundOrder) => {
+    try {
+      await wmsApi.cancelOutbound(order.id);
+      toast.success('Orden cancelada y stock liberado');
+      orders.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cancelar la orden');
+    }
+  };
+
+  return (
+    <>
+      <PageTitle title="Envio" subtitle="Complete transportista, guia y datos de entrega antes de cerrar la salida" />
+      <div className="wms-grid cols-3 mb-5">
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Listas para envio</div><div className="mt-2 text-3xl font-extrabold">{shippingOrders.length}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Unidades por entregar</div><div className="mt-2 text-3xl font-extrabold">{shippingOrders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0)}</div></div>
+        <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Clientes pendientes</div><div className="mt-2 text-3xl font-extrabold">{new Set(shippingOrders.map((order) => order.clientId)).size}</div></div>
+      </div>
+      <div className="wms-card">
+        <DataTable
+          data={shippingOrders}
+          columns={[
+            { header: 'Despacho', accessorKey: 'orderNo' },
+            { header: 'Cliente', cell: ({ row }) => row.original.client.name },
+            { header: 'Bodega', cell: ({ row }) => row.original.warehouse.name },
+            { header: 'OC', cell: ({ row }) => row.original.purchaseOrder || '-' },
+            { header: 'Contenido', cell: ({ row }) => row.original.items.map((item) => `${item.product?.sku} x${item.quantity}`).join(', ') },
+            { header: 'Estado', cell: ({ row }) => <Badge value={row.original.status} /> },
+            {
+              header: 'Acciones',
+              cell: ({ row }) => (
+                <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
+                  <button className="wms-button" onClick={() => printOrderPdf('outbound', row.original)}>
+                    <FileDown size={16} /> PDF
+                  </button>
+                  <button className="wms-button" onClick={() => downloadOutboundLabels(row.original)}>
+                    <Printer size={16} /> Etiquetas
+                  </button>
+                  <button className="wms-button" onClick={() => setDetailOrder(row.original)}>
+                    Revisar
+                  </button>
+                  <button className="wms-button primary" onClick={() => setShippingReview(row.original)}>
+                    Enviar
+                  </button>
+                  <button className="wms-button danger" onClick={() => cancel(row.original)}>
+                    Cancelar
+                  </button>
+                </div>
+              ),
+            },
+          ]}
+          onRowClick={(order) => setDetailOrder(order)}
+        />
+        {!shippingOrders.length ? <div className="wms-card-body text-sm text-slate-500">No hay despachos listos para envio.</div> : null}
+      </div>
       {shippingReview ? (
-        <ShipmentReview
+        <ShippingReview
           order={shippingReview}
           onClose={() => setShippingReview(null)}
-          onSend={() => ship(shippingReview)}
+          onSend={(payload) => ship(shippingReview, payload)}
           onEdit={() => {
             setDetailOrder(shippingReview);
             setShippingReview(null);

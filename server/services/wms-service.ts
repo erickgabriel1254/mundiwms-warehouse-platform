@@ -129,6 +129,14 @@ const pickingCompleteSchema = z.object({
   action: z.enum(['dispatch', 'ship']).default('dispatch'),
 });
 
+const outboundShippingSchema = z.object({
+  carrierName: z.string().trim().max(120).optional().default(''),
+  guideNumber: z.string().trim().max(80).optional().default(''),
+  deliveryAddress: z.string().trim().max(240).optional().default(''),
+  receiverName: z.string().trim().max(120).optional().default(''),
+  shippingNotes: z.string().trim().max(500).optional().default(''),
+});
+
 const adjustmentSchema = z.object({
   type: z.enum(['POSITIVE', 'NEGATIVE', 'BLOCK', 'UNBLOCK', 'RELOCATE']),
   productId: z.string().min(1),
@@ -1205,10 +1213,22 @@ export async function dispatchOutbound(id: string, userId: string, companyId: st
   return result;
 }
 
-export async function shipOutbound(id: string, userId: string, companyId: string) {
+export async function completePacking(id: string, userId: string, companyId: string) {
+  const result = await prisma.$transaction(async (tx) => {
+    const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, select: { status: true } });
+    if (!order || order.status !== 'PACKING') throw new Error('Solo se puede finalizar una orden en packing');
+    await tx.outboundOrder.update({ where: { id }, data: { status: 'DISPATCHED' } });
+    return { ok: true };
+  }, TX_OPTIONS);
+  await auditLog({ companyId, userId, action: 'PACKING', entity: 'OutboundOrder', entityId: id, summary: 'Packing finalizado y listo para envio' });
+  return result;
+}
+
+export async function shipOutbound(id: string, userId: string, companyId: string, body: unknown = {}) {
+  const shipping = outboundShippingSchema.parse(body);
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.outboundOrder.findFirst({ where: { id, companyId }, include: { items: { include: { product: true } } } });
-    if (!order || !['PACKING', 'DISPATCHED'].includes(order.status)) throw new Error('Solo se puede enviar una orden en packing');
+    if (!order || order.status !== 'DISPATCHED') throw new Error('Primero finalice packing antes de confirmar el envio');
 
     for (const item of order.items) {
       const serials = cleanSerials(item.serialNumbers);
@@ -1228,16 +1248,35 @@ export async function shipOutbound(id: string, userId: string, companyId: string
           userId,
           documentType: 'OUTBOUND',
           documentNo: order.orderNo,
-          observation: 'Envio final confirmado',
+          observation: shipping.guideNumber ? `Envio final confirmado / Guia ${shipping.guideNumber}` : 'Envio final confirmado',
         },
       });
     }
 
-    await tx.outboundOrder.update({ where: { id }, data: { status: 'SHIPPED' } });
+    await tx.outboundOrder.update({
+      where: { id },
+      data: {
+        status: 'SHIPPED',
+        carrierName: shipping.carrierName || null,
+        guideNumber: shipping.guideNumber || null,
+        deliveryAddress: shipping.deliveryAddress || null,
+        receiverName: shipping.receiverName || null,
+        shippingNotes: shipping.shippingNotes || null,
+        shippedAt: new Date(),
+      },
+    });
     await rebuildBalances(tx);
     return { ok: true };
   }, TX_OPTIONS);
-  await auditLog({ companyId, userId, action: 'SHIP', entity: 'OutboundOrder', entityId: id, summary: 'Envio final confirmado' });
+  await auditLog({
+    companyId,
+    userId,
+    action: 'SHIP',
+    entity: 'OutboundOrder',
+    entityId: id,
+    summary: 'Envio final confirmado',
+    metadata: shipping,
+  });
   return result;
 }
 
@@ -1380,13 +1419,15 @@ export async function completePicking(body: unknown, userId: string, companyId: 
   const data = pickingCompleteSchema.parse(body);
   const uniqueOrderIds = Array.from(new Set(data.orderIds));
   for (const orderId of uniqueOrderIds) {
-      if (data.action === 'ship') {
-        const order = await prisma.outboundOrder.findFirst({ where: { id: orderId, companyId }, select: { status: true } });
-        if (order?.status === 'RESERVED') await dispatchOutbound(orderId, userId, companyId);
-        await shipOutbound(orderId, userId, companyId);
-      } else {
-        await dispatchOutbound(orderId, userId, companyId);
-      }
+    if (data.action === 'ship') {
+      const order = await prisma.outboundOrder.findFirst({ where: { id: orderId, companyId }, select: { status: true } });
+      if (order?.status === 'RESERVED') await dispatchOutbound(orderId, userId, companyId);
+      const updated = await prisma.outboundOrder.findFirst({ where: { id: orderId, companyId }, select: { status: true } });
+      if (updated?.status === 'PACKING') await completePacking(orderId, userId, companyId);
+      await shipOutbound(orderId, userId, companyId);
+    } else {
+      await dispatchOutbound(orderId, userId, companyId);
+    }
   }
   await auditLog({ companyId, userId, action: 'PICKING', entity: 'OutboundOrder', summary: `Picking guiado completado para ${uniqueOrderIds.length} ordenes y enviado a packing`, metadata: { orderIds: uniqueOrderIds, action: data.action } });
   return { ok: true, processed: uniqueOrderIds.length };

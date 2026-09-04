@@ -326,11 +326,17 @@ model OutboundOrder {
   locationId  String
   location    Location            @relation(fields: [locationId], references: [id])
   purchaseOrder String?
+  carrierName String?
+  guideNumber String?
+  deliveryAddress String?
+  receiverName String?
+  shippingNotes String?
   status      String              @default("DRAFT")
   notes       String?
   createdById String?
   createdBy   User?               @relation(fields: [createdById], references: [id])
   confirmedAt DateTime?
+  shippedAt   DateTime?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   items       OutboundOrderItem[]

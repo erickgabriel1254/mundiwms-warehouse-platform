@@ -3,6 +3,7 @@ import {
   cancelInbound,
   cancelImportOrder,
   cancelOutbound,
+  completePacking,
   completeImportOrder,
   confirmInbound,
   createAdjustment,
@@ -121,7 +122,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
     if (method === 'PUT' && parts[0] === 'outbound' && parts[1]) return send(res, 200, await saveOutbound(await readBody(req), user.id, companyId, parts[1]));
     if (method === 'POST' && parts[0] === 'outbound' && parts[2] === 'reserve') return send(res, 200, await reserveOutbound(parts[1], user.id, companyId));
     if (method === 'POST' && parts[0] === 'outbound' && parts[2] === 'dispatch') return send(res, 200, await dispatchOutbound(parts[1], user.id, companyId));
-    if (method === 'POST' && parts[0] === 'outbound' && parts[2] === 'ship') return send(res, 200, await shipOutbound(parts[1], user.id, companyId));
+    if (method === 'POST' && parts[0] === 'outbound' && parts[2] === 'packing') return send(res, 200, await completePacking(parts[1], user.id, companyId));
+    if (method === 'POST' && parts[0] === 'outbound' && parts[2] === 'ship') return send(res, 200, await shipOutbound(parts[1], user.id, companyId, await readBody(req)));
     if (method === 'POST' && parts[0] === 'outbound' && parts[2] === 'cancel') return send(res, 200, await cancelOutbound(parts[1], companyId, user.id));
     if (method === 'GET' && path === '/picking/plan') return send(res, 200, await getPickingPlan(url.searchParams, companyId));
     if (method === 'POST' && path === '/picking/complete') return send(res, 200, await completePicking(await readBody(req), user.id, companyId));
