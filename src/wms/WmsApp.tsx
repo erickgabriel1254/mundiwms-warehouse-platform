@@ -1892,7 +1892,7 @@ function RackTopButton({ rack, onSelectRack }: { rack: RackGroup; onSelectRack: 
   );
 }
 
-function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void }) {
+function WarehouseLocationMap({ warehouse, locations, onEdit, onChanged }: { warehouse: WarehouseType; locations: Location[]; onEdit: (location: Location) => void; onChanged: () => void }) {
   const [rackDetail, setRackDetail] = useState<RackGroup | null>(null);
   const warehouseLocations = locations.filter((location) => location.warehouseId === warehouse.id).sort(compareLocationLayout);
   const rackGroups = buildRackGroups(warehouseLocations);
@@ -1912,16 +1912,90 @@ function WarehouseLocationMap({ warehouse, locations, onEdit }: { warehouse: War
           </button>
         ))}
       </div>
-      {rackDetail ? <RackFrontModal rack={rackDetail} onClose={() => setRackDetail(null)} onEdit={onEdit} /> : null}
+      {rackDetail ? <RackFrontModal rack={rackDetail} onClose={() => setRackDetail(null)} onEdit={onEdit} onChanged={() => { setRackDetail(null); onChanged(); }} /> : null}
     </>
   );
 }
 
-function RackFrontModal({ rack, onClose, onEdit }: { rack: { aisle: string; rack: string; locations: Location[] }; onClose: () => void; onEdit: (location: Location) => void }) {
+function RackFrontModal({ rack, onClose, onEdit, onChanged }: { rack: RackGroup; onClose: () => void; onEdit: (location: Location) => void; onChanged: () => void }) {
+  const [saving, setSaving] = useState(false);
   const levels = Array.from(new Set(rack.locations.map((location) => location.level || 'N/A'))).sort((a, b) => b.localeCompare(a, 'es', { numeric: true }));
   const positions = Array.from(new Set(rack.locations.map((location) => location.position || 'N/A'))).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  const numericLevels = rack.locations.map((location) => parseLayoutNumber(location.level)).filter(Boolean);
+  const numericPositions = rack.locations.map((location) => parseLayoutNumber(location.position)).filter(Boolean);
+  const maxLevel = Math.max(1, ...numericLevels);
+  const maxPosition = Math.max(1, ...numericPositions);
+  const padRackValue = (value: number) => String(value).padStart(2, '0');
+  const base = rack.locations[0];
+  const saveRackLocation = async (levelValue: number, positionValue: number) => {
+    if (!base) return;
+    const level = padRackValue(levelValue);
+    const position = padRackValue(positionValue);
+    const payload = {
+      warehouseId: base.warehouseId,
+      code: locationLayoutCode({ zone: base.zone, aisle: base.aisle, rack: base.rack, level, position, code: '' }),
+      name: `Zona ${base.zone || '-'} / Pasillo ${base.aisle || '-'} / Rack ${base.rack || '-'} / Nivel ${level} / Posicion ${position}`,
+      zone: base.zone ?? '',
+      aisle: base.aisle ?? '',
+      rack: base.rack ?? '',
+      level,
+      position,
+      mapX: rack.mapX,
+      mapY: rack.mapY,
+      mapW: 1,
+      mapH: 1,
+      pickSequence: (rack.mapY + 1) * 10000 + (rack.mapX + 1) * 100 + levelValue * 10 + positionValue,
+      kind: base.kind ?? 'STORAGE',
+    };
+    await wmsApi.saveLocation(payload);
+  };
+  const runRackChange = async (change: 'add-level' | 'remove-level' | 'add-position' | 'remove-position') => {
+    if (!base || saving) return;
+    setSaving(true);
+    try {
+      if (change === 'add-level') {
+        await Promise.all(Array.from({ length: maxPosition }, (_, index) => saveRackLocation(maxLevel + 1, index + 1)));
+        toast.success('Nivel agregado al rack');
+      }
+      if (change === 'add-position') {
+        await Promise.all(Array.from({ length: maxLevel }, (_, index) => saveRackLocation(index + 1, maxPosition + 1)));
+        toast.success('Posicion agregada al rack');
+      }
+      if (change === 'remove-level') {
+        if (maxLevel <= 1) throw new Error('El rack debe conservar al menos un nivel');
+        const removable = rack.locations.filter((location) => parseLayoutNumber(location.level) === maxLevel);
+        if (removable.some((location) => getLocationStats(location).total > 0)) throw new Error('No se puede quitar un nivel que tiene stock');
+        await Promise.all(removable.map((location) => wmsApi.deleteLocation(location.id)));
+        toast.success('Nivel retirado del rack');
+      }
+      if (change === 'remove-position') {
+        if (maxPosition <= 1) throw new Error('El rack debe conservar al menos una posicion');
+        const removable = rack.locations.filter((location) => parseLayoutNumber(location.position) === maxPosition);
+        if (removable.some((location) => getLocationStats(location).total > 0)) throw new Error('No se puede quitar una posicion que tiene stock');
+        await Promise.all(removable.map((location) => wmsApi.deleteLocation(location.id)));
+        toast.success('Posicion retirada del rack');
+      }
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo modificar el rack');
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <Modal title={`Rack ${rack.rack} / Pasillo ${rack.aisle}`} onClose={onClose}>
+      <div className="wms-rack-tools">
+        <div>
+          <strong>Estructura del rack</strong>
+          <span>{levels.length} niveles / {positions.length} posiciones por nivel</span>
+        </div>
+        <div className="wms-actions">
+          <button type="button" className="wms-button" disabled={saving} onClick={() => runRackChange('add-level')}>+ Nivel</button>
+          <button type="button" className="wms-button" disabled={saving} onClick={() => runRackChange('remove-level')}>- Nivel</button>
+          <button type="button" className="wms-button" disabled={saving} onClick={() => runRackChange('add-position')}>+ Posicion</button>
+          <button type="button" className="wms-button" disabled={saving} onClick={() => runRackChange('remove-position')}>- Posicion</button>
+        </div>
+      </div>
       <div className="wms-rack-front">
         <div className="wms-rack-front-grid" style={{ gridTemplateColumns: `88px repeat(${positions.length}, minmax(92px, 1fr))` }}>
           <div className="wms-rack-front-head">Nivel</div>
@@ -2215,7 +2289,7 @@ function WarehousesPage() {
                     Nueva ubicacion
                   </button>
                 </div>
-                <WarehouseLocationMap warehouse={warehouse} locations={locations} onEdit={(location) => setEditingLocation({ location })} />
+                <WarehouseLocationMap warehouse={warehouse} locations={locations} onEdit={(location) => setEditingLocation({ location })} onChanged={catalogs.refresh} />
                 <div className="wms-map-legend">
                   <span><i className="empty" /> Libre</span>
                   <span><i className="filled" /> Con stock</span>
@@ -2564,6 +2638,105 @@ function pickingItemKey(item: PickingPlan['items'][number], index: number) {
 
 function normalizeScan(value: string) {
   return value.trim().toUpperCase();
+}
+
+function emptyPickingPlan(): PickingPlan {
+  return { orders: [], items: [], totals: { orders: 0, lines: 0, units: 0, locations: 0 } };
+}
+
+function getRouteRackLabel(item: PickingPlan['items'][number]) {
+  const rack = item.locationCode.match(/-R([^-]+)/)?.[1] ?? item.locationCode.match(/R([^-]+)/)?.[1] ?? '-';
+  return `Rack ${rack}`;
+}
+
+function PickingRouteMap({ items, pickedSet, currentIndex }: { items: PickingPlan['items']; pickedSet: Set<string>; currentIndex: number }) {
+  if (!items.length) return null;
+  const locations = Array.from(
+    items.reduce((map, item, index) => {
+      const key = `${item.warehouseId}|${item.mapX}|${item.mapY}`;
+      const current = map.get(key) ?? {
+        warehouseId: item.warehouseId,
+        warehouse: item.warehouse,
+        mapX: item.mapX,
+        mapY: item.mapY,
+        locationCode: item.locationCode,
+        rack: getRouteRackLabel(item),
+        indexes: [] as number[],
+        quantity: 0,
+      };
+      current.indexes.push(index);
+      current.quantity += item.quantity;
+      map.set(key, current);
+      return map;
+    }, new Map<string, { warehouseId: string; warehouse: string; mapX: number; mapY: number; locationCode: string; rack: string; indexes: number[]; quantity: number }>()),
+  );
+  const byWarehouse = Array.from(
+    locations.reduce((map, location) => {
+      const current = map.get(location.warehouseId) ?? { warehouse: location.warehouse, locations: [] as typeof locations };
+      current.locations.push(location);
+      map.set(location.warehouseId, current);
+      return map;
+    }, new Map<string, { warehouse: string; locations: typeof locations }>()),
+  );
+
+  return (
+    <div className="wms-picking-map">
+      {byWarehouse.map(([warehouseId, group]) => {
+        const cols = Math.max(6, ...group.locations.map((location) => location.mapX + 1));
+        const rows = Math.max(2, ...group.locations.map((location) => location.mapY + 1));
+        return (
+          <section key={warehouseId} className="wms-picking-map-zone">
+            <div className="wms-picking-map-title">{group.warehouse}</div>
+            <div
+              className="wms-picking-map-grid"
+              style={{
+                gridTemplateColumns: `34px repeat(${cols}, minmax(44px, 1fr))`,
+                gridTemplateRows: `26px repeat(${rows}, 56px)`,
+              }}
+            >
+              <div className="wms-builder-axis corner" />
+              {Array.from({ length: cols }, (_, index) => (
+                <div className="wms-builder-axis" key={`pick-col-${warehouseId}-${index}`}>C{index + 1}</div>
+              ))}
+              {Array.from({ length: rows }, (_, index) => (
+                <div className="wms-builder-axis row" key={`pick-row-${warehouseId}-${index}`} style={{ gridColumn: 1, gridRow: index + 2 }}>F{index + 1}</div>
+              ))}
+              {Array.from({ length: rows }, (_, y) =>
+                Array.from({ length: cols }, (_, x) => {
+                  const isAccessColumn = (x + 1) % 3 === 0;
+                  return (
+                    <div
+                      className={`wms-picking-map-cell ${isAccessColumn ? 'access' : ''}`}
+                      key={`pick-cell-${warehouseId}-${x}-${y}`}
+                      style={{ gridColumn: x + 2, gridRow: y + 2 }}
+                    >
+                      {isAccessColumn ? 'Acceso' : ''}
+                    </div>
+                  );
+                }),
+              )}
+              {group.locations.map((location) => {
+                const firstIndex = Math.min(...location.indexes);
+                const completed = location.indexes.every((index) => pickedSet.has(pickingItemKey(items[index], index)));
+                const current = location.indexes.includes(currentIndex);
+                return (
+                  <div
+                    className={`wms-picking-map-stop ${completed ? 'picked' : current ? 'current' : ''}`}
+                    key={`${warehouseId}-${location.mapX}-${location.mapY}`}
+                    style={{ gridColumn: location.mapX + 2, gridRow: location.mapY + 2 }}
+                  >
+                    <strong>{firstIndex + 1}</strong>
+                    <span>{location.rack}</span>
+                    <small>{location.quantity} unid.</small>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 type OrderPayload = {
@@ -3390,11 +3563,14 @@ function OutboundPage() {
 function PickingPage() {
   const orders = useLoad(() => wmsApi.outbound(), []);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [activeIds, setActiveIds] = useState<string[]>([]);
+  const [pickingStarted, setPickingStarted] = useState(false);
   const [scan, setScan] = useState('');
   const [pickedKeys, setPickedKeys] = useState<string[]>([]);
-  const selectedKey = selectedIds.join(',');
-  const plan = useLoad<PickingPlan>(() => wmsApi.pickingPlan(selectedIds), [selectedKey]);
+  const activeKey = activeIds.join(',');
+  const plan = useLoad<PickingPlan>(() => (activeIds.length ? wmsApi.pickingPlan(activeIds) : Promise.resolve(emptyPickingPlan())), [activeKey]);
   const eligibleOrders = (orders.data ?? []).filter((order) => order.status === 'RESERVED');
+  const selectedOrders = eligibleOrders.filter((order) => selectedIds.includes(order.id));
   const displayPlan = plan.data;
   const routeItems = displayPlan?.items ?? [];
   const routeKey = routeItems.map((item, index) => pickingItemKey(item, index)).join('|');
@@ -3407,7 +3583,7 @@ function PickingPage() {
   useEffect(() => {
     setPickedKeys([]);
     setScan('');
-  }, [selectedKey]);
+  }, [activeKey]);
   useEffect(() => {
     setPickedKeys((current) => current.filter((key) => routeKey.includes(key)));
   }, [routeKey]);
@@ -3415,6 +3591,15 @@ function PickingPage() {
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
   const selectAll = () => setSelectedIds(eligibleOrders.map((order) => order.id));
+  const clearSelection = () => setSelectedIds([]);
+  const generatePicking = () => {
+    if (!selectedIds.length) {
+      toast.error('Seleccione al menos un despacho para generar picking');
+      return;
+    }
+    setActiveIds(selectedIds);
+    setPickingStarted(true);
+  };
   const validateScan = (event: FormEvent) => {
     event.preventDefault();
     if (!currentItem) return toast.success('Ruta completamente recogida');
@@ -3432,27 +3617,100 @@ function PickingPage() {
   };
   const complete = async () => {
     if (!allPicked) return toast.error('Debe escanear todos los puntos de la ruta antes de finalizar');
-    const ids = selectedIds.length ? selectedIds : displayPlan?.orders.map((order) => order.id) ?? [];
+    const ids = activeIds.length ? activeIds : displayPlan?.orders.map((order) => order.id) ?? [];
     if (!ids.length) return toast.error('No hay despachos para procesar');
     try {
       await wmsApi.completePicking(ids, 'dispatch');
       toast.success('Picking finalizado y despachos pasados a Despachado');
       setSelectedIds([]);
+      setActiveIds([]);
       setPickedKeys([]);
+      setPickingStarted(false);
       orders.refresh();
       plan.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo completar picking');
     }
   };
+
+  if (!pickingStarted) {
+    return (
+      <>
+        <PageTitle
+          title="Picking guiado"
+          subtitle="Seleccione uno o varios despachos para armar una ruta de recoleccion"
+          action={
+            <div className="wms-actions">
+              <button className="wms-button" onClick={selectAll}>Seleccionar todo</button>
+              <button className="wms-button" onClick={clearSelection}>Limpiar</button>
+              <button className="wms-button primary" onClick={generatePicking}><RouteIcon size={16} /> Generar picking guiado</button>
+            </div>
+          }
+        />
+        <div className="wms-grid cols-2">
+          <div className="wms-card">
+            <div className="wms-card-header">
+              <div>
+                <h3 className="font-extrabold">Despachos generados</h3>
+                <p className="text-sm text-slate-500">Solo aparecen despachos reservados pendientes por recoger fisicamente.</p>
+              </div>
+            </div>
+            <div className="wms-card-body grid gap-2">
+              {eligibleOrders.map((order) => (
+                <label className={`wms-picking-order ${selectedSet.has(order.id) ? 'selected' : ''}`} key={order.id}>
+                  <input type="checkbox" checked={selectedSet.has(order.id)} onChange={() => toggle(order.id)} />
+                  <span>
+                    <strong>{order.orderNo}</strong>
+                    <small>{order.client.name} / {order.warehouse.name}</small>
+                    <small>{order.items.length} lineas / {order.items.reduce((sum, item) => sum + item.quantity, 0)} unidades</small>
+                  </span>
+                </label>
+              ))}
+              {!eligibleOrders.length ? <div className="text-sm text-slate-500">No hay despachos reservados pendientes de picking.</div> : null}
+            </div>
+          </div>
+          <div className="wms-card">
+            <div className="wms-card-header">
+              <div>
+                <h3 className="font-extrabold">Contenido seleccionado</h3>
+                <p className="text-sm text-slate-500">{selectedOrders.length ? `${selectedOrders.length} despachos listos para ruta` : 'Seleccione despachos para ver el contenido'}</p>
+              </div>
+            </div>
+            <div className="wms-card-body">
+              <div className="wms-picking-preview">
+                {selectedOrders.map((order) => (
+                  <section className="wms-picking-preview-order" key={order.id}>
+                    <div>
+                      <strong>{order.orderNo}</strong>
+                      <span>{order.client.name}</span>
+                    </div>
+                    {order.items.map((item) => (
+                      <div className="wms-picking-preview-item" key={item.id ?? `${order.id}-${item.productId}`}>
+                        <span>{item.product?.sku ?? '-'}</span>
+                        <strong>{item.product?.name ?? '-'}</strong>
+                        <b>{item.quantity}</b>
+                      </div>
+                    ))}
+                  </section>
+                ))}
+                {!selectedOrders.length ? <div className="text-sm text-slate-500">Aqui se mostraran SKU, descripcion y cantidad de los despachos seleccionados.</div> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <PageTitle
         title="Picking guiado"
-        subtitle="Ruta sugerida para preparar uno o varios despachos en la bodega"
+        subtitle="Siga el camino sugerido y valide cada punto con escaner"
         action={
           <div className="wms-actions">
-            <button className="wms-button" onClick={selectAll}>Seleccionar todo</button>
+            <button className="wms-button" onClick={() => setPickingStarted(false)}>Volver a seleccionar</button>
+            <button className="wms-button" onClick={plan.refresh}>Recalcular ruta</button>
             <button className="wms-button primary" onClick={complete} disabled={!allPicked}><RouteIcon size={16} /> Finalizar picking</button>
           </div>
         }
@@ -3462,6 +3720,19 @@ function PickingPage() {
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Lineas</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.lines ?? 0}</div></div>
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Unidades</div><div className="mt-2 text-3xl font-extrabold">{displayPlan?.totals.units ?? 0}</div></div>
         <div className="wms-card wms-card-body"><div className="text-sm font-bold text-slate-500">Recogido</div><div className="mt-2 text-3xl font-extrabold">{pickedUnits}/{displayPlan?.totals.units ?? 0}</div></div>
+      </div>
+      <div className="wms-card mb-5">
+        <div className="wms-card-header">
+          <div>
+            <h3 className="font-extrabold">Mapa de recorrido</h3>
+            <p className="text-sm text-slate-500">Los numeros indican el orden recomendado para pasar por cada rack.</p>
+          </div>
+        </div>
+        <div className="wms-card-body">
+          <PickingRouteMap items={routeItems} pickedSet={pickedSet} currentIndex={currentIndex} />
+          {!routeItems.length && !plan.loading ? <div className="text-sm text-slate-500">No hay unidades reservadas para los despachos seleccionados.</div> : null}
+          {plan.loading ? <div className="text-sm text-slate-500">Calculando ruta...</div> : null}
+        </div>
       </div>
       <form className="wms-card mb-5" onSubmit={validateScan}>
         <div className="wms-card-header">
@@ -3492,50 +3763,29 @@ function PickingPage() {
           )}
         </div>
       </form>
-      <div className="wms-grid cols-2">
-        <div className="wms-card">
-          <div className="wms-card-header">
-            <h3 className="font-extrabold">Pendientes por recoger</h3>
-          </div>
-          <div className="wms-card-body grid gap-2">
-            {eligibleOrders.map((order) => (
-              <label className="wms-picking-order" key={order.id}>
-                <input type="checkbox" checked={selectedSet.has(order.id)} onChange={() => toggle(order.id)} />
-                <span>
-                  <strong>{order.orderNo}</strong>
-                  <small>{order.client.name} / {statusLabels[order.status]}</small>
-                </span>
-              </label>
-            ))}
-            {!eligibleOrders.length ? <div className="text-sm text-slate-500">No hay despachos reservados pendientes de recoger.</div> : null}
-          </div>
+      <div className="wms-card">
+        <div className="wms-card-header">
+          <h3 className="font-extrabold">Ruta en palabras</h3>
         </div>
-        <div className="wms-card">
-          <div className="wms-card-header">
-            <h3 className="font-extrabold">Ruta sugerida</h3>
-            <button className="wms-button" onClick={plan.refresh}>Recalcular</button>
-          </div>
-          <div className="wms-card-body">
-            <div className="wms-picking-route">
-              {(displayPlan?.items ?? []).map((item, index) => (
-                <div className={`wms-picking-step ${pickedSet.has(pickingItemKey(item, index)) ? 'picked' : index === currentIndex ? 'current' : ''}`} key={`${item.orderId}-${item.productId}-${item.locationId}-${index}`}>
-                  <div className="wms-picking-index">{index + 1}</div>
-                  <div>
-                    <div className="font-extrabold">{item.locationCode} / {item.location}</div>
-                    <div className="text-sm text-slate-600">{item.sku} - {item.product}</div>
-                    <div className="text-xs text-slate-500">{item.orderNo} / {item.client}</div>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-slate-700">
-                      <span>Cant. {item.quantity}</span>
-                      <span>Lote {item.lots.length ? item.lots.join(', ') : '-'}</span>
-                      <span>Vence {formatDateOnly(item.expirationDate)}</span>
-                      {item.serials.length ? <span>Series {item.serials.join(', ')}</span> : null}
-                      {pickedSet.has(pickingItemKey(item, index)) ? <span>Recogido</span> : null}
-                    </div>
+        <div className="wms-card-body">
+          <div className="wms-picking-route">
+            {(displayPlan?.items ?? []).map((item, index) => (
+              <div className={`wms-picking-step ${pickedSet.has(pickingItemKey(item, index)) ? 'picked' : index === currentIndex ? 'current' : ''}`} key={`${item.orderId}-${item.productId}-${item.locationId}-${index}`}>
+                <div className="wms-picking-index">{index + 1}</div>
+                <div>
+                  <div className="font-extrabold">Dirigirse a {item.locationCode} / {item.location}</div>
+                  <div className="text-sm text-slate-600">Recoger {item.quantity} de {item.sku} - {item.product}</div>
+                  <div className="text-xs text-slate-500">{item.orderNo} / {item.client}</div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-slate-700">
+                    <span>Lote {item.lots.length ? item.lots.join(', ') : '-'}</span>
+                    <span>Vence {formatDateOnly(item.expirationDate)}</span>
+                    {item.serials.length ? <span>Series {item.serials.join(', ')}</span> : null}
+                    {pickedSet.has(pickingItemKey(item, index)) ? <span>Recogido</span> : null}
                   </div>
                 </div>
-              ))}
-              {!displayPlan?.items?.length ? <div className="text-sm text-slate-500">Seleccione despachos reservados o genere reservas para ver la ruta.</div> : null}
-            </div>
+              </div>
+            ))}
+            {!displayPlan?.items?.length ? <div className="text-sm text-slate-500">No hay ruta calculada para estos despachos.</div> : null}
           </div>
         </div>
       </div>
