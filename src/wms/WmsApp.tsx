@@ -2669,7 +2669,7 @@ function PickingRouteMap({ items, pickedSet, currentIndex }: { items: PickingPla
       map.set(key, current);
       return map;
     }, new Map<string, { warehouseId: string; warehouse: string; mapX: number; mapY: number; locationCode: string; rack: string; indexes: number[]; quantity: number }>()),
-  );
+  ).map(([, value]) => value);
   const byWarehouse = Array.from(
     locations.reduce((map, location) => {
       const current = map.get(location.warehouseId) ?? { warehouse: location.warehouse, locations: [] as typeof locations };
