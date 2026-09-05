@@ -38,7 +38,7 @@ import { createContext, FormEvent, Fragment, ReactNode, useContext, useEffect, u
 import { useForm } from 'react-hook-form';
 import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { clearToken, downloadCsv, getCompanyId, setCompanyId as persistCompanyId, setToken, wmsApi } from './api';
@@ -511,6 +511,10 @@ function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
 function DashboardPage() {
   const { data, loading } = useLoad<DashboardData>(() => wmsApi.dashboard(), []);
   if (loading || !data) return <ScreenState title="Calculando dashboard" />;
+  const radialPalette = ['#dc2626', '#f97316', '#2563eb', '#16a34a', '#7c3aed', '#0f766e'];
+  const supplierClockData = data.supplierReceptionTimes.map((item, index) => ({ ...item, fill: radialPalette[index % radialPalette.length] }));
+  const clientClockData = data.clientDispatchTimes.map((item, index) => ({ ...item, fill: radialPalette[(index + 2) % radialPalette.length] }));
+  const clockLimit = Math.max(1, ...supplierClockData.map((item) => item.avgHours), ...clientClockData.map((item) => item.avgHours));
   const cards = [
     ['Recepciones por ingresar', data.totals.inboundPending],
     ['Picking pendiente', data.totals.outboundPending],
@@ -577,8 +581,9 @@ function DashboardPage() {
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
+                <Bar dataKey="received" name="Recepciones" fill="#2563eb" radius={[6, 6, 0, 0]} />
                 <Bar dataKey="pendingPicking" name="Picking pendiente" fill="#f59e0b" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="dispatched" name="Packing" fill="#dc2626" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="dispatched" name="Packing/listo" fill="#dc2626" radius={[6, 6, 0, 0]} />
                 <Bar dataKey="shipped" name="Enviado" fill="#16a34a" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -588,13 +593,72 @@ function DashboardPage() {
             columns={[
               { header: 'Usuario', accessorKey: 'user' },
               { header: 'Rol', accessorKey: 'role' },
+              { header: 'Recepciones', accessorKey: 'received' },
               { header: 'Picking pendiente', accessorKey: 'pendingPicking' },
               { header: 'Packing', accessorKey: 'dispatched' },
               { header: 'Enviado', accessorKey: 'shipped' },
+              { header: 'Acciones', accessorKey: 'actions' },
+              { header: 'Prom. recepcion h', accessorKey: 'avgReceptionHours' },
               { header: 'Prom. despacho h', accessorKey: 'avgDispatchHours' },
+              { header: 'Prom. picking h', accessorKey: 'avgPickingHours' },
+              { header: 'Prom. packing h', accessorKey: 'avgPackingHours' },
               { header: 'Prom. envio h', accessorKey: 'avgShipmentHours' },
             ]}
           />
+        </div>
+      </div>
+      <div className="wms-grid cols-2 mb-5">
+        <div className="wms-card">
+          <div className="wms-card-header">
+            <h3 className="font-extrabold">Reloj supervisor: recepcion por proveedor</h3>
+          </div>
+          <div className="wms-card-body h-80">
+            <ResponsiveContainer>
+              <RadialBarChart data={supplierClockData} innerRadius="28%" outerRadius="92%" startAngle={90} endAngle={-270}>
+                <PolarAngleAxis type="number" domain={[0, clockLimit]} tick={false} />
+                <RadialBar dataKey="avgHours" name="Horas promedio" background cornerRadius={8} />
+                <Tooltip formatter={(value, name, item) => [`${value} h (${item.payload.orders} ordenes)`, name]} />
+                <Legend iconSize={10} />
+              </RadialBarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="wms-card">
+          <div className="wms-card-header">
+            <h3 className="font-extrabold">Tiempo de despacho por cliente</h3>
+          </div>
+          <div className="wms-card-body h-80">
+            <ResponsiveContainer>
+              <RadialBarChart data={clientClockData} innerRadius="28%" outerRadius="92%" startAngle={90} endAngle={-270}>
+                <PolarAngleAxis type="number" domain={[0, clockLimit]} tick={false} />
+                <RadialBar dataKey="avgHours" name="Horas promedio" background cornerRadius={8} />
+                <Tooltip formatter={(value, name, item) => [`${value} h (${item.payload.orders} ordenes)`, name]} />
+                <Legend iconSize={10} />
+              </RadialBarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+      <div className="wms-card mb-5">
+        <div className="wms-card-header">
+          <h3 className="font-extrabold">Tiempos promedio por usuario</h3>
+        </div>
+        <div className="wms-card-body h-80">
+          <ResponsiveContainer>
+            <BarChart data={data.userKpis} margin={{ left: 8, right: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="user" tick={{ fontSize: 10 }} />
+              <YAxis allowDecimals />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="avgReceptionHours" name="Recepcion" fill="#2563eb" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="avgDispatchHours" name="Despacho" fill="#dc2626" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="avgPickingHours" name="Picking" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="avgGuidedPickingHours" name="Picking guiado" fill="#7c3aed" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="avgPackingHours" name="Packing" fill="#0f766e" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="avgShipmentHours" name="Envio" fill="#16a34a" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
       <MovementsCard movements={data.recentMovements} />
@@ -691,12 +755,12 @@ function ProductsPage() {
             <thead>
               <tr>
                 <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Reservado</th>
                 <th>Categoria</th>
                 <th>Marca</th>
                 <th>Precio venta</th>
                 <th>Serie</th>
-                <th>Disponible</th>
-                <th>Reservado</th>
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
@@ -719,12 +783,12 @@ function ProductsPage() {
                           </div>
                         </div>
                       </td>
+                      <td className="font-extrabold">{available}</td>
+                      <td>{reserved}</td>
                       <td>{product.category}</td>
                       <td>{product.brand}</td>
                       <td>${Number(product.salePrice ?? 0).toFixed(2)}</td>
                       <td>{product.managesSerial ? 'Si' : 'No'}</td>
-                      <td>{available}</td>
-                      <td>{reserved}</td>
                       <td><Badge value={product.status} /></td>
                       <td>
                         <div className="wms-actions" onClick={(event) => event.stopPropagation()}>
@@ -1158,12 +1222,12 @@ function InventoryPage() {
             <thead>
               <tr>
                 <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Reservado</th>
+                <th>Otros estados</th>
                 <th>Categoria</th>
                 <th>Bodega</th>
                 <th>Ubicacion</th>
-                <th>Disponible</th>
-                <th>Reservado</th>
-                <th>Otros estados</th>
                 <th>Series activas</th>
               </tr>
             </thead>
@@ -1183,12 +1247,12 @@ function InventoryPage() {
                           </div>
                         </div>
                       </td>
+                      <td className="font-extrabold">{row.available}</td>
+                      <td>{row.reserved}</td>
+                      <td>{row.other}</td>
                       <td>{row.product.category}</td>
                       <td>{row.warehouses.join(', ')}</td>
                       <td>{row.locations.join(', ')}</td>
-                      <td>{row.available}</td>
-                      <td>{row.reserved}</td>
-                      <td>{row.other}</td>
                       <td>{row.series.length}</td>
                     </tr>
                     {isOpen && canExpand ? (

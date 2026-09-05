@@ -265,12 +265,20 @@ export type DashboardData = {
     userId: string;
     user: string;
     role: string;
+    received: number;
     pendingPicking: number;
     dispatched: number;
     shipped: number;
+    actions: number;
+    avgReceptionHours: number;
     avgDispatchHours: number;
+    avgPickingHours: number;
+    avgGuidedPickingHours: number;
+    avgPackingHours: number;
     avgShipmentHours: number;
   }[];
+  supplierReceptionTimes: { name: string; avgHours: number; orders: number }[];
+  clientDispatchTimes: { name: string; avgHours: number; orders: number }[];
 };
 
 export type PickingPlanItem = {

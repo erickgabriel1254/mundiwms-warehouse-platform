@@ -20,6 +20,7 @@
     "api:stock:demo": "tsx scripts/seed-demo-inventory-api.ts",
     "api:ops:carvatel": "tsx scripts/seed-carvatel-operations-api.ts",
     "api:users:demo": "tsx scripts/update-demo-users.ts",
+    "db:analytics:demo": "tsx scripts/enrich-demo-analytics.ts",
     "db:empty": "tsx prisma/empty-demo.ts",
     "db:reset": "prisma migrate reset --force",
     "deploy:vercel": "vercel --prod",

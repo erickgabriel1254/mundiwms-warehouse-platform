@@ -15,6 +15,13 @@ async function main() {
       previousEmails: ['admin@mundiwms.local'],
     },
     {
+      email: 'admin.operaciones@demo',
+      name: 'Admin Operaciones',
+      password: 'Admin123!',
+      roleCode: 'ADMIN',
+      previousEmails: [],
+    },
+    {
       email: 'supervisor@demo',
       name: 'Supervisor Logistico',
       password: 'Supervisor123!',
@@ -22,11 +29,46 @@ async function main() {
       previousEmails: ['supervisor@mundiwms.local'],
     },
     {
+      email: 'supervisor.turno1@demo',
+      name: 'Supervisor Turno 1',
+      password: 'Supervisor123!',
+      roleCode: 'SUPERVISOR',
+      previousEmails: [],
+    },
+    {
+      email: 'supervisor.turno2@demo',
+      name: 'Supervisor Turno 2',
+      password: 'Supervisor123!',
+      roleCode: 'SUPERVISOR',
+      previousEmails: [],
+    },
+    {
       email: 'despacho@demo',
       name: 'Despachador',
       password: 'Despacho123!',
       roleCode: 'OPERATOR',
       previousEmails: ['despachador@mundiwms.local', 'bodega@mundiwms.local'],
+    },
+    {
+      email: 'despacho.norte@demo',
+      name: 'Despacho Norte',
+      password: 'Despacho123!',
+      roleCode: 'OPERATOR',
+      previousEmails: [],
+    },
+    {
+      email: 'despacho.cedis@demo',
+      name: 'Despacho CEDIS',
+      password: 'Despacho123!',
+      roleCode: 'OPERATOR',
+      previousEmails: [],
+    },
+    {
+      email: 'despacho.ruta@demo',
+      name: 'Despacho Ruta',
+      password: 'Despacho123!',
+      roleCode: 'OPERATOR',
+      previousEmails: [],
     },
   ];
 
@@ -65,7 +107,7 @@ async function main() {
     });
   }
 
-  console.log('Usuarios demo actualizados: admin@demo, supervisor@demo, despacho@demo');
+  console.log(`Usuarios demo actualizados: ${demoUsers.map((user) => user.email).join(', ')}`);
 }
 
 main()

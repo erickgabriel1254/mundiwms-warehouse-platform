@@ -304,6 +304,22 @@ function orderItemsSummary(items: Array<{ productId: string; quantity: number }>
   };
 }
 
+function hoursBetween(start?: Date | null, end?: Date | null) {
+  if (!start || !end) return null;
+  return Math.max(0, Number(((end.getTime() - start.getTime()) / 3600000).toFixed(1)));
+}
+
+function averageHours(values: Array<number | null>) {
+  const usable = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  return usable.length ? Number((usable.reduce((sum, value) => sum + value, 0) / usable.length).toFixed(1)) : 0;
+}
+
+function orderIdsFromMetadata(metadata: Prisma.JsonValue | null) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
+  const value = (metadata as { orderIds?: unknown }).orderIds;
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
 function normalizeCategoryCode(value: string) {
   const code = value
     .trim()
@@ -358,7 +374,20 @@ export async function getCatalogs(companyId: string) {
 
 export async function getDashboard(companyId: string) {
   const since30Days = new Date(Date.now() - 30 * 86400000);
-  const [products, units, inboundPending, outboundPending, outboundDispatched, movements, movementProducts, categoryProducts, outboundForKpis, users] = await Promise.all([
+  const [
+    products,
+    units,
+    inboundPending,
+    outboundPending,
+    outboundDispatched,
+    movements,
+    movementProducts,
+    categoryProducts,
+    inboundForKpis,
+    outboundForKpis,
+    auditLogs,
+    users,
+  ] = await Promise.all([
     prisma.product.findMany({ include: { inventoryBalances: { where: { warehouse: { companyId } } } } }),
     prisma.inventoryUnit.findMany({ where: { warehouse: { companyId } } }),
     prisma.inboundOrder.count({ where: { companyId, status: { in: ['DRAFT', 'PENDING'] } } }),
@@ -377,11 +406,23 @@ export async function getDashboard(companyId: string) {
       include: { product: true },
     }),
     prisma.product.groupBy({ by: ['category'], _count: { _all: true } }),
+    prisma.inboundOrder.findMany({
+      where: { companyId, createdAt: { gte: since30Days } },
+      include: { supplier: true, createdBy: { include: { role: true } } },
+    }),
     prisma.outboundOrder.findMany({
       where: { companyId, createdAt: { gte: since30Days } },
-      include: { createdBy: { include: { role: true } } },
+      include: { client: true, createdBy: { include: { role: true } } },
     }),
-    prisma.user.findMany({ include: { role: true } }),
+    prisma.auditLog.findMany({
+      where: {
+        companyId,
+        createdAt: { gte: since30Days },
+        action: { in: ['CREATE', 'UPDATE', 'CONFIRM', 'RESERVE', 'PICKING', 'PACKING', 'SHIP', 'CANCEL'] },
+      },
+      include: { user: { include: { role: true } } },
+    }),
+    prisma.user.findMany({ where: { isActive: true }, include: { role: true } }),
   ]);
 
   const lowStockProducts = products.map((product) => {
@@ -407,30 +448,102 @@ export async function getDashboard(companyId: string) {
     }, new Map<string, { id: string; sku: string; name: string; movements: number; quantity: number }>()),
   ).map(([, value]) => value).sort((a, b) => b.movements - a.movements).slice(0, 8);
 
+  const inboundById = new Map(inboundForKpis.map((order) => [order.id, order]));
+  const outboundById = new Map(outboundForKpis.map((order) => [order.id, order]));
+  const guidedPickingLogs = auditLogs.filter((log) => log.action === 'PICKING' && !log.entityId && log.summary.toLowerCase().includes('picking guiado'));
+
+  const supplierReceptionTimes = Array.from(
+    inboundForKpis
+      .filter((order) => order.confirmedAt)
+      .reduce((map, order) => {
+        const current = map.get(order.supplierId) ?? { name: order.supplier.name, values: [] as number[] };
+        const hours = hoursBetween(order.createdAt, order.confirmedAt);
+        if (hours !== null) current.values.push(hours);
+        map.set(order.supplierId, current);
+        return map;
+      }, new Map<string, { name: string; values: number[] }>()),
+  )
+    .map(([, value]) => ({ name: value.name, avgHours: averageHours(value.values), orders: value.values.length }))
+    .filter((item) => item.orders > 0)
+    .sort((a, b) => b.avgHours - a.avgHours)
+    .slice(0, 6);
+
+  const clientDispatchTimes = Array.from(
+    outboundForKpis
+      .filter((order) => order.confirmedAt)
+      .reduce((map, order) => {
+        const current = map.get(order.clientId) ?? { name: order.client.name, values: [] as number[] };
+        const hours = hoursBetween(order.createdAt, order.confirmedAt);
+        if (hours !== null) current.values.push(hours);
+        map.set(order.clientId, current);
+        return map;
+      }, new Map<string, { name: string; values: number[] }>()),
+  )
+    .map(([, value]) => ({ name: value.name, avgHours: averageHours(value.values), orders: value.values.length }))
+    .filter((item) => item.orders > 0)
+    .sort((a, b) => b.avgHours - a.avgHours)
+    .slice(0, 6);
+
   const userKpis = users
     .map((user) => {
-      const rows = outboundForKpis.filter((order) => order.createdById === user.id);
-      const dispatchHours = rows
+      const inboundRows = inboundForKpis.filter((order) => order.createdById === user.id);
+      const outboundRows = outboundForKpis.filter((order) => order.createdById === user.id);
+      const logs = auditLogs.filter((log) => log.userId === user.id);
+      const dispatchHours = outboundRows
         .filter((order) => order.confirmedAt)
-        .map((order) => Math.max(0, Number(((order.confirmedAt!.getTime() - order.createdAt.getTime()) / 3600000).toFixed(1))));
-      const shipmentHours = rows
-        .filter((order) => order.status === 'SHIPPED')
-        .map((order) => {
-          const closeDate = order.confirmedAt ?? order.createdAt;
-          return Math.max(0, Number(((closeDate.getTime() - order.createdAt.getTime()) / 3600000).toFixed(1)));
+        .map((order) => hoursBetween(order.createdAt, order.confirmedAt));
+      const receptionHours = logs
+        .filter((log) => log.action === 'CONFIRM' && log.entity === 'InboundOrder' && log.entityId)
+        .map((log) => {
+          const order = inboundById.get(log.entityId!);
+          return order ? hoursBetween(order.createdAt, log.createdAt) : null;
+        });
+      const pickingHours = logs
+        .filter((log) => log.action === 'PICKING' && log.entity === 'OutboundOrder' && log.entityId)
+        .map((log) => {
+          const order = outboundById.get(log.entityId!);
+          return order ? hoursBetween(order.createdAt, log.createdAt) : null;
+        });
+      const guidedPickingHours = guidedPickingLogs
+        .filter((log) => log.userId === user.id)
+        .map((log) => {
+          const orders = orderIdsFromMetadata(log.metadata as Prisma.JsonValue | null)
+            .map((orderId) => outboundById.get(orderId))
+            .filter((order): order is NonNullable<typeof order> => Boolean(order));
+          const earliest = orders.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+          return earliest ? hoursBetween(earliest.createdAt, log.createdAt) : null;
+        });
+      const packingHours = logs
+        .filter((log) => log.action === 'PACKING' && log.entity === 'OutboundOrder' && log.entityId)
+        .map((log) => {
+          const order = outboundById.get(log.entityId!);
+          return order ? hoursBetween(order.confirmedAt ?? order.createdAt, log.createdAt) : null;
+        });
+      const shipmentHours = logs
+        .filter((log) => log.action === 'SHIP' && log.entity === 'OutboundOrder' && log.entityId)
+        .map((log) => {
+          const order = outboundById.get(log.entityId!);
+          return order ? hoursBetween(order.confirmedAt ?? order.createdAt, log.createdAt) : null;
         });
       return {
         userId: user.id,
         user: user.name,
         role: user.role.name,
-        pendingPicking: rows.filter((order) => order.status === 'RESERVED').length,
-        dispatched: rows.filter((order) => ['PACKING', 'DISPATCHED'].includes(order.status)).length,
-        shipped: rows.filter((order) => order.status === 'SHIPPED').length,
-        avgDispatchHours: dispatchHours.length ? Number((dispatchHours.reduce((sum, value) => sum + value, 0) / dispatchHours.length).toFixed(1)) : 0,
-        avgShipmentHours: shipmentHours.length ? Number((shipmentHours.reduce((sum, value) => sum + value, 0) / shipmentHours.length).toFixed(1)) : 0,
+        received: inboundRows.filter((order) => order.status === 'RECEIVED').length,
+        pendingPicking: outboundRows.filter((order) => order.status === 'RESERVED').length,
+        dispatched: outboundRows.filter((order) => ['PACKING', 'DISPATCHED'].includes(order.status)).length,
+        shipped: outboundRows.filter((order) => order.status === 'SHIPPED').length,
+        actions: logs.length,
+        avgReceptionHours: averageHours(receptionHours.length ? receptionHours : inboundRows.map((order) => hoursBetween(order.createdAt, order.confirmedAt))),
+        avgDispatchHours: averageHours(dispatchHours),
+        avgPickingHours: averageHours(pickingHours),
+        avgGuidedPickingHours: averageHours(guidedPickingHours),
+        avgPackingHours: averageHours(packingHours),
+        avgShipmentHours: averageHours(shipmentHours),
       };
     })
-    .sort((a, b) => b.pendingPicking + b.dispatched + b.shipped - (a.pendingPicking + a.dispatched + a.shipped));
+    .filter((item) => item.actions + item.received + item.pendingPicking + item.dispatched + item.shipped > 0 || ['ADMIN', 'SUPERVISOR', 'OPERATOR'].includes(users.find((user) => user.id === item.userId)?.role.code ?? ''))
+    .sort((a, b) => b.actions + b.received + b.pendingPicking + b.dispatched + b.shipped - (a.actions + a.received + a.pendingPicking + a.dispatched + a.shipped));
 
   return {
     totals: {
@@ -450,6 +563,8 @@ export async function getDashboard(companyId: string) {
     lowStockProducts: lowStockProducts.sort((a, b) => a.available - b.available).slice(0, 8),
     topMovingProducts,
     userKpis,
+    supplierReceptionTimes,
+    clientDispatchTimes,
   };
 }
 
