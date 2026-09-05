@@ -1,7 +1,9 @@
 const API_BASE = process.env.WMS_API_URL ?? 'https://mundiwms-demo.vercel.app';
 const EMAIL = process.env.WMS_ADMIN_EMAIL ?? 'admin@demo';
 const PASSWORD = process.env.WMS_ADMIN_PASSWORD ?? 'Admin123!';
-const MARKER = 'CTV-OPS-2026';
+const MARKER = process.env.WMS_DEMO_MARKER ?? 'CTV-OPS-2026';
+const IMPORT_WAVE_COUNT = Number(process.env.WMS_IMPORT_WAVES ?? 8);
+const OUTBOUND_WAVE_COUNT = Number(process.env.WMS_OUTBOUND_WAVES ?? 10);
 
 type Company = { id: string; code: string; name: string };
 type Warehouse = { id: string; code: string; name: string };
@@ -305,10 +307,36 @@ function buildOutboundItems(company: Company, units: InventoryUnit[], products: 
 async function ensureOutbound(token: string, company: Company, purchaseOrder: string, payload: unknown, finalStatus: 'RESERVED' | 'DISPATCHED' | 'SHIPPED') {
   const existing = await api<OutboundOrder[]>('/outbound', token, company.id);
   const found = existing.find((order) => order.purchaseOrder === purchaseOrder);
-  if (found) return 'existente';
+  if (found) {
+    if (finalStatus === 'SHIPPED' && found.status !== 'SHIPPED' && found.status !== 'CANCELLED') {
+      if (found.status === 'PACKING') await api(`/outbound/${found.id}/packing`, token, company.id, { method: 'POST' });
+      if (found.status === 'DISPATCHED' || found.status === 'PACKING') {
+        await api(`/outbound/${found.id}/ship`, token, company.id, {
+          method: 'POST',
+          body: JSON.stringify({
+            carrierName: 'Transporte Demo Carvatel',
+            trackingNumber: `${purchaseOrder}-GUIA`,
+            shippedTo: 'Cliente demo mayorista',
+            notes: 'Envio generado automaticamente para simulacion comercial',
+          }),
+        });
+        return 'existente enviada';
+      }
+    }
+    return 'existente';
+  }
   const created = await api<OutboundOrder>('/outbound', token, company.id, { method: 'POST', body: JSON.stringify(payload) });
   if (finalStatus === 'SHIPPED') {
-    await api(`/outbound/${created.id}/ship`, token, company.id, { method: 'POST' });
+    await api(`/outbound/${created.id}/packing`, token, company.id, { method: 'POST' });
+    await api(`/outbound/${created.id}/ship`, token, company.id, {
+      method: 'POST',
+      body: JSON.stringify({
+        carrierName: 'Transporte Demo Carvatel',
+        trackingNumber: `${purchaseOrder}-GUIA`,
+        shippedTo: 'Cliente demo mayorista',
+        notes: 'Envio generado automaticamente para simulacion comercial',
+      }),
+    });
     return 'creado, despachado y enviado';
   }
   return finalStatus === 'DISPATCHED' ? 'creado y despachado' : 'creado y reservado';
@@ -344,11 +372,18 @@ async function tuneStockMinimums(token: string, companies: Company[], catalogsBy
 
 async function seedCompany(token: string, company: Company) {
   let catalogs = await api<Catalogs>('/catalogs', token, company.id);
-  const supplier = await ensureContact(token, company, catalogs, 'suppliers', 1);
-  const supplier2 = await ensureContact(token, company, catalogs, 'suppliers', 2);
-  const client = await ensureContact(token, company, catalogs, 'clients', 1);
-  const client2 = await ensureContact(token, company, catalogs, 'clients', 2);
+  const suppliers: Contact[] = [];
+  const clients: Contact[] = [];
+  for (let index = 1; index <= 4; index += 1) {
+    suppliers.push(await ensureContact(token, company, catalogs, 'suppliers', index));
+  }
+  for (let index = 1; index <= 5; index += 1) {
+    clients.push(await ensureContact(token, company, catalogs, 'clients', index));
+  }
   catalogs = await api<Catalogs>('/catalogs', token, company.id);
+  const [supplier, supplier2] = suppliers;
+  const [client, client2] = clients;
+  if (!supplier || !supplier2 || !client || !client2) throw new Error(`No se pudieron preparar contactos demo para ${company.name}`);
 
   const warehouse = pickWarehouse(catalogs);
   const receiving = pickLocation(catalogs, warehouse.id, 'RECEIVING');
@@ -400,10 +435,11 @@ async function seedCompany(token: string, company: Company) {
     items: inboundItems(company, products, storage, `${company.code}-LOCAL2`, 5, 5, 0.8),
   }, true));
 
-  for (let wave = 1; wave <= 4; wave += 1) {
-    await ensureImportOrder(token, company, wave % 2 ? supplier.id : supplier2.id, `${MARKER}-${company.code}-PED-WAVE-${wave}`, products, wave === 4 ? 'DRAFT' : 'REQUESTED', wave, 5, 0.75 + wave * 0.12);
+  for (let wave = 1; wave <= IMPORT_WAVE_COUNT; wave += 1) {
+    const waveSupplier = suppliers[wave % suppliers.length] ?? supplier;
+    await ensureImportOrder(token, company, waveSupplier.id, `${MARKER}-${company.code}-PED-WAVE-${wave}`, products, wave % 4 === 0 ? 'DRAFT' : 'REQUESTED', wave, 5, 0.75 + wave * 0.12);
     results.push(await ensureInbound(token, company, `${MARKER}-${company.code}-REC-WAVE-${wave}`, {
-      supplierId: wave % 2 ? supplier.id : supplier2.id,
+      supplierId: waveSupplier.id,
       warehouseId: warehouse.id,
       locationId: receiving.id,
       status: 'PENDING',
@@ -412,7 +448,7 @@ async function seedCompany(token: string, company: Company) {
       guideNumber: `GUIA-${company.code}-2${String(wave).padStart(2, '0')}`,
       notes: `Recepcion de simulacion ${wave} para historial operativo`,
       items: inboundItems(company, products, storage, `${company.code}-WAVE${wave}`, wave, 4, 0.55 + wave * 0.15),
-    }, wave !== 4));
+    }, wave % 4 !== 0));
   }
 
   results.push(await ensureInbound(token, company, `${MARKER}-${company.code}-REC-PENDIENTE`, {
@@ -469,13 +505,14 @@ async function seedCompany(token: string, company: Company) {
     }, 'RESERVED'));
   }
 
-  for (let wave = 1; wave <= 5; wave += 1) {
+  for (let wave = 1; wave <= OUTBOUND_WAVE_COUNT; wave += 1) {
     inventory = await api<Inventory>(`/inventory?status=AVAILABLE&warehouseId=${encodeURIComponent(warehouse.id)}`, token, company.id);
     const waveItems = buildOutboundItems(company, inventory.units, products, warehouse.id, `WAVE${wave}`, wave, 5, 0.35 + wave * 0.08);
     if (!waveItems.length) continue;
     const finalStatus = wave % 3 === 0 ? 'SHIPPED' : wave % 2 === 0 ? 'DISPATCHED' : 'RESERVED';
+    const waveClient = clients[wave % clients.length] ?? client;
     results.push(await ensureOutbound(token, company, `${MARKER}-${company.code}-OUT-WAVE-${wave}`, {
-      clientId: wave % 2 ? client.id : client2.id,
+      clientId: waveClient.id,
       warehouseId: warehouse.id,
       locationId: dispatch.id,
       purchaseOrder: `${MARKER}-${company.code}-OUT-WAVE-${wave}`,

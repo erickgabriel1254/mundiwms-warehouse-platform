@@ -748,7 +748,7 @@ function ProductsPage() {
                               <div><strong>Codigo de barra:</strong> {product.barcode || '-'}</div>
                               <div><strong>Codigos alternos:</strong> {product.barcodes?.length ? product.barcodes.join(', ') : '-'}</div>
                               <div><strong>Precio compra:</strong> ${Number(product.purchasePrice ?? 0).toFixed(2)}</div>
-                              <div><strong>Descripcion:</strong> {product.description || '-'}</div>
+                              <div className="text-xs leading-snug text-slate-600" title={product.description || undefined}><strong>Descripcion:</strong> {shortText(product.description, 150)}</div>
                               <div><strong>Incluye:</strong> {product.includes?.length ? product.includes.join(', ') : '-'}</div>
                               <div><strong>Fuente:</strong> {product.sourceUrl ? <a className="text-red-600 underline" href={product.sourceUrl} target="_blank" rel="noreferrer">Ver catalogo</a> : '-'}</div>
                             </div>
@@ -4139,6 +4139,12 @@ function htmlSafe(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char] ?? char);
 }
 
+function shortText(value?: string | null, maxLength = 140) {
+  const text = (value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return '-';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}...` : text;
+}
+
 const LABEL_WIDTH_MM = 51;
 const LABEL_HEIGHT_MM = 25;
 const LABEL_GAP_MM = 5;
@@ -4424,11 +4430,11 @@ function generateProductZpl(product: Product) {
 ^PW${LABEL_WIDTH_DOTS}
 ^LL${LABEL_HEIGHT_DOTS}
 ^LH0,0
-^FO16,10^A0N,24,24^FD${zplSafe(product.sku, 26)}^FS
-^FO16,40^A0N,18,18^FB376,2,1,L,0^FD${zplSafe(product.name, 54)}^FS
-^FO16,84^A0N,16,16^FDCodigo: ${zplSafe(code, 30)}^FS
-^BY2,2,54
-^FO16,118^BCN,54,Y,N,N^FD${code}^FS
+^FO14,10^A0N,24,24^FD${zplSafe(product.sku, 24)}^FS
+^FO14,40^A0N,17,17^FB258,3,1,L,0^FD${zplSafe(product.name, 72)}^FS
+^FO14,118^A0N,16,16^FDCodigo: ${zplSafe(code, 24)}^FS
+^FO284,42^BQN,2,4^FDLA,${code}^FS
+^FO292,154^A0N,14,14^FDQR producto^FS
 ^XZ`;
 }
 
@@ -4437,6 +4443,7 @@ async function printProductLabel(product: Product) {
     title: product.sku,
     eyebrow: 'Producto',
     code: product.barcode || product.sku,
+    codeType: 'qr',
     lines: [
       product.name,
       `Codigo: ${product.barcode || product.sku}`,
@@ -4458,11 +4465,11 @@ function generateLocationZpl(location: Location) {
 ^LL${LABEL_HEIGHT_DOTS}
 ^LH0,0
 ^FO16,10^A0N,24,24^FD${zplSafe(code, 28)}^FS
-^FO16,38^A0N,16,16^FB376,2,1,L,0^FD${zplSafe(location.name || '-', 54)}^FS
-^FO16,78^A0N,16,16^FDZona ${zplSafe(location.zone || '-', 10)} / Pasillo ${zplSafe(location.aisle || '-', 10)}^FS
-^FO16,100^A0N,16,16^FDRack ${zplSafe(location.rack || '-', 8)} / Nivel ${zplSafe(location.level || '-', 8)} / Pos. ${zplSafe(location.position || '-', 8)}^FS
-^BY2,2,48
-^FO16,128^BCN,48,Y,N,N^FD${code}^FS
+^FO16,40^A0N,16,16^FB258,2,1,L,0^FD${zplSafe(location.name || '-', 52)}^FS
+^FO16,84^A0N,16,16^FDZona ${zplSafe(location.zone || '-', 10)} / Pasillo ${zplSafe(location.aisle || '-', 10)}^FS
+^FO16,108^A0N,16,16^FDRack ${zplSafe(location.rack || '-', 8)} / Nivel ${zplSafe(location.level || '-', 8)} / Pos. ${zplSafe(location.position || '-', 8)}^FS
+^FO284,42^BQN,2,4^FDLA,${code}^FS
+^FO292,154^A0N,14,14^FDQR ubicacion^FS
 ^XZ`;
 }
 
@@ -4471,6 +4478,7 @@ async function printLocationLabel(location: Location) {
     title: location.code || locationLayoutCode(location),
     eyebrow: 'Ubicacion bodega',
     code: location.code || locationLayoutCode(location),
+    codeType: 'qr',
     lines: [
       location.name,
       `Zona: ${location.zone || '-'}`,
